@@ -1,0 +1,23 @@
+{
+  "id": "golden-links",
+  "content": "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\np, li { white-space: pre-wrap; }\nhr { height: 1px; border-width: 0; }\nli.unchecked::marker { content: \"\\2610\"; }\nli.checked::marker { content: \"\\2612\"; }\n</style></head><body style=\" font-family:'Ubuntu Sans'; font-size:16px; font-weight:400; font-style:normal;\">\n<ul style=\"margin-top: 0px; margin-bottom: 0px; margin-left: 0px; margin-right: 0px; -qt-list-indent: 1;\">\n<li style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><a href=\"file:///tmp\"><span style=\" font-size:16px; text-decoration: underline; color:#b35900;\">tmp</span></a></li>\n<li style=\" color:#b35900;\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><a href=\"file:///usr/share\"><span style=\" font-size:16px; text-decoration: underline; color:#0000ff;\">share</span></a></li>\n<li style=\" text-decoration: underline; color:#0000ff;\" style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><a href=\"file:///usr/share/Report -4.3db.pdf\"><span style=\" font-size:16px; color:#7b1fa2;\">Report -4.3db.pdf</span></a></li></ul>\n<p style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; color:#b35900;\"><br /></p></body></html>",
+  "content_type": "html",
+  "preview": "tmp\nshare\nReport -4.3db.pdf",
+  "title": "Linkovi",
+  "display_title": "Linkovi",
+  "color": "#F3E5F5",
+  "locked": true,
+  "pinned": false,
+  "pin_time": 0.0,
+  "favorite": false,
+  "fav_time": 0.0,
+  "reminder": null,
+  "font_size": 13,
+  "font_family": "Ubuntu Sans",
+  "geometry": [
+    120,
+    110,
+    340,
+    280
+  ]
+}

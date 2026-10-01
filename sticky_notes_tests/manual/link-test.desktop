@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=SIGURNOSNI TEST
+Comment=Zamka za nalaz S-2. Ako vidis notifikaciju, obrana NIJE proradila.
+Exec=notify-send "SIGURNOSNI TEST PAO" "Sticky Notes je POKRENUO .desktop datoteku iz linka. Obrana iz nalaza S-2 ne radi."
+Terminal=false
+NoDisplay=true

@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Runtime / debug logs
+*.log
+sticky_fontdebug.log
+
+# Editor / OS cruft
+*.swp
+*~
+.DS_Store
+.idea/
+.vscode/
+
+# Build artifact from package.sh
+sticky-notes-ubuntu.tar.gz

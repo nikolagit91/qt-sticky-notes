@@ -1,0 +1,44 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>S-2 test linkova</title>
+<style>
+ body{font:16px/1.7 system-ui;max-width:42em;margin:3em auto;padding:0 1em}
+ li{margin:.7em 0}
+ code{background:#eee;padding:1px 4px;border-radius:3px}
+ .nb{background:#fff8e1;border-left:4px solid #fbc02d;padding:.8em 1em;margin:2em 0}
+</style>
+<h1>S-2 — test linkova</h1>
+
+<p>Označi <b>cijeli popis ispod</b> (od prve do zadnje stavke), Ctrl+C, pa Ctrl+V
+   u praznu Sticky notu. Hrefovi tako dolaze iz stvarnog HTML-a, kao s bilo koje
+   web stranice — to je put koji nalaz S-2 pokriva.</p>
+
+<p>Aplikaciju pokreni <b>iz terminala</b>
+   (<code>cd &lt;repo&gt; &amp;&amp; python3 -m sticky_notes</code>) — dokaz
+   odbijanja je poruka <code>[link] refusing…</code> na stderr.</p>
+
+<ol>
+  <li><a href="https://example.org/stvarno-odrediste">banka.hr</a>
+      — tekst laže; tooltip mora pokazati <code>example.org</code></li>
+  <li><a href="link-test.desktop">Otvori dokument</a>
+      — <code>.desktop</code>, mora biti ODBIJEN</li>
+  <li><a href="javascript:alert(1)">Klikni ovdje</a>
+      — <code>javascript:</code>, mora biti ODBIJEN</li>
+  <li><a href="https://www.gnome.org/">GNOME (običan web link)</a>
+      — mora se OTVORITI normalno</li>
+  <li><a href=".">Mapa (ova mapa)</a>
+      — mora se OTVORITI u Files</li>
+  <li><a href="mailto:ime@example.com">e-mail</a>
+      — mora otvoriti mail klijent</li>
+</ol>
+
+<div class="nb">
+  <b>Stavke 4–6 nisu ukras.</b> Bez njih test prolazi i na kodu koji odbija
+  <i>sve</i> linkove — negativna tvrdnja („opasno se ne otvara") mora imati
+  pozitivnu polovicu („obično se otvara").
+</div>
+
+<p><small>Stavke 2 i 5 su <b>relativne</b>: preglednik ih pri kopiranju pretvori u
+   apsolutne <code>file://</code> putanje na računalu na kojem je stranica otvorena
+   (provjeri u tooltipu note da počinju s <code>file:///</code>). Zato rade gdje god
+   repo bio i ne nose ničiju osobnu putanju.</small></p>

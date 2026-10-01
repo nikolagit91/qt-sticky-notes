@@ -1,0 +1,23 @@
+{
+  "id": "golden-checklist",
+  "content": "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0//EN\" \"http://www.w3.org/TR/REC-html40/strict.dtd\">\n<html><head><meta name=\"qrichtext\" content=\"1\" /><meta charset=\"utf-8\" /><style type=\"text/css\">\np, li { white-space: pre-wrap; }\nhr { height: 1px; border-width: 0; }\nli.unchecked::marker { content: \"\\2610\"; }\nli.checked::marker { content: \"\\2612\"; }\n</style></head><body style=\" font-family:'Ubuntu Sans'; font-size:16px; font-weight:400; font-style:normal;\">\n<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><a href=\"x-sticky-check\"><span style=\" font-size:16px; color:#000000;\">☑</span></a><span style=\" font-size:16px; color:#000000;\"> </span><span style=\" font-size:16px; text-decoration: line-through; color:#9aa0a6;\">mlijeko</span></p>\n<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:1; text-indent:0px;\"><a href=\"x-sticky-check\"><span style=\" font-size:16px; color:#000000;\">☑</span></a><span style=\" font-size:16px; color:#000000;\"> </span><span style=\" font-size:16px; text-decoration: line-through; color:#9aa0a6;\">maslac</span></p>\n<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:1; text-indent:0px;\"><a href=\"x-sticky-check\"><span style=\" font-size:16px; color:#000000;\">☑</span></a><span style=\" font-size:16px; color:#000000;\"> </span><span style=\" font-size:16px; text-decoration: line-through; color:#9aa0a6;\">SDFSD</span></p>\n<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:1; text-indent:0px;\"><a href=\"x-sticky-check\"><span style=\" font-size:16px; color:#000000;\">☑</span></a><span style=\" font-size:16px; color:#000000;\"> </span><span style=\" font-size:16px; text-decoration: line-through; color:#9aa0a6;\">SDF</span></p>\n<p style=\"-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px; color:#000000;\"><br /></p>\n<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><a href=\"x-sticky-check\"><span style=\" font-size:16px; color:#000000;\">☑</span></a><span style=\" font-size:16px; color:#000000;\"> </span><span style=\" font-size:16px; text-decoration: line-through; color:#9aa0a6;\">kruh</span></p>\n<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><a href=\"x-sticky-check\"><span style=\" font-size:16px; color:#000000;\">☐</span></a><span style=\" font-size:16px; color:#000000;\"> pavlaka</span></p>\n<p style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;\"><a href=\"x-sticky-check\"><span style=\" font-size:16px; color:#000000;\">☐</span></a><span style=\" font-size:16px; color:#000000;\"> pomfrit </span></p></body></html>",
+  "content_type": "html",
+  "preview": "☑ mlijeko\n☑ maslac\n☑ SDFSD\n☑ SDF\n\n☑ kruh…",
+  "title": "Checkbox lista",
+  "display_title": "Checkbox lista",
+  "color": "#E3F2FD",
+  "locked": false,
+  "pinned": false,
+  "pin_time": 0.0,
+  "favorite": false,
+  "fav_time": 0.0,
+  "reminder": null,
+  "font_size": 13,
+  "font_family": "Ubuntu Sans",
+  "geometry": [
+    80,
+    90,
+    360,
+    300
+  ]
+}
