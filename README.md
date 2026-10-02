@@ -37,6 +37,20 @@ desktop, sync to a tray icon, and survive restarts.
   </tr>
 </table>
 
+**Global search** (`Super+Shift+F`) — finds notes by title or content, from anywhere.
+
+<table>
+  <tr>
+    <td><img src="docs/img/search-light.png" alt="Global search, light theme"></td>
+    <td><img src="docs/img/search-dark.png" alt="Global search, dark theme"></td>
+  </tr>
+</table>
+
+**Tray menu** — the main entry point. On Ubuntu it works out of the box (the
+AppIndicator extension is enabled by default).
+
+<img src="docs/img/tray.png" alt="Tray menu" width="300">
+
 ## Requirements
 
 - Ubuntu 24.04 LTS (or newer) with GNOME.
