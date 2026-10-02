@@ -4,10 +4,7 @@ A lightweight sticky notes app for the Ubuntu desktop, built with Python & PyQt6
 Fast, keyboard-friendly, and it stays out of your way — notes live on your
 desktop, sync to a tray icon, and survive restarts.
 
-<!-- SCREENSHOTS: add real GNOME screenshots here, e.g.
-![Notes on the desktop](docs/img/notes.png)
-![Settings](docs/img/settings.png)
--->
+![Sticky notes on the Ubuntu desktop — checklist, code block, formatting, reminder and links](docs/img/notes-light.png)
 
 ## Features
 
@@ -20,6 +17,25 @@ desktop, sync to a tray icon, and survive restarts.
 - **Backups:** rotating automatic backups with restore.
 - **Reminders** and full-text **search** across all notes.
 - **Multilingual UI:** 11 languages — English, Croatian, German, Spanish, French, Russian, Simplified Chinese, Brazilian Portuguese, Italian, Polish, and Japanese.
+
+## Screenshots
+
+**Dark theme** with clean mode — the header and toolbar stay hidden until you hover a note.
+
+![Notes in the dark theme with clean mode](docs/img/notes-dark.png)
+
+**Notes Manager** and **Settings** — light and dark.
+
+<table>
+  <tr>
+    <td><img src="docs/img/manager-light.png" alt="Notes Manager, light theme"></td>
+    <td><img src="docs/img/settings-light.png" alt="Settings, light theme"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/img/manager-dark.png" alt="Notes Manager, dark theme"></td>
+    <td><img src="docs/img/settings-dark.png" alt="Settings, dark theme"></td>
+  </tr>
+</table>
 
 ## Requirements
 
