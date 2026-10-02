@@ -77,10 +77,7 @@ class SearchPalette(QDialog):
         outer.setContentsMargins(0, 0, 0, 0)
         frame = QFrame()
         frame.setObjectName("paletteFrame")
-        frame.setStyleSheet(
-            f"#paletteFrame {{ background: {UI.WINDOW_BG}; "
-            f"border: 1px solid {UI.BORDER}; border-radius: 10px; }}"
-        )
+        self._frame = frame
         outer.addWidget(frame)
 
         lay = QVBoxLayout(frame)
@@ -90,14 +87,6 @@ class SearchPalette(QDialog):
         self.search = QLineEdit()
         self.search.setPlaceholderText(tr("Search notes…"))
         self.search.setClearButtonEnabled(True)
-        self.search.setStyleSheet(f"""
-            QLineEdit {{
-                padding: 9px 11px; border: 1px solid {UI.BORDER};
-                border-radius: 7px; background: {UI.SURFACE};
-                font-size: 14px; color: {UI.TEXT};
-            }}
-            QLineEdit:focus {{ border: 1px solid {UI.ACCENT}; }}
-        """)
         self.search.textChanged.connect(self._refresh)
         self.search.installEventFilter(self)
         lay.addWidget(self.search)
@@ -121,13 +110,39 @@ class SearchPalette(QDialog):
         lay.addWidget(self.list)
 
         self.empty = QLabel(tr("No matching notes"))
-        self.empty.setStyleSheet(f"color: {UI.TEXT_MUTED}; font-size: 13px; padding: 14px 4px;")
         self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty.hide()
         lay.addWidget(self.empty)
 
+        self._apply_style()
         self.resize(560, 430)
         self._refresh()
+
+    def _apply_style(self):
+        """Bake the current UI.* colours into the stylesheets. Split out of
+        __init__ because the palette is built once and reused: retheme() must
+        re-apply these on a live theme change, or the frame and search box stay
+        in the theme of the first open while the rows (painted by the delegate)
+        follow the new one."""
+        self._frame.setStyleSheet(
+            f"#paletteFrame {{ background: {UI.WINDOW_BG}; "
+            f"border: 1px solid {UI.BORDER}; border-radius: 10px; }}"
+        )
+        self.search.setStyleSheet(f"""
+            QLineEdit {{
+                padding: 9px 11px; border: 1px solid {UI.BORDER};
+                border-radius: 7px; background: {UI.SURFACE};
+                font-size: 14px; color: {UI.TEXT};
+            }}
+            QLineEdit:focus {{ border: 1px solid {UI.ACCENT}; }}
+        """)
+        self.empty.setStyleSheet(f"color: {UI.TEXT_MUTED}; font-size: 13px; padding: 14px 4px;")
+
+    def retheme(self):
+        """Live theme change: restyle in place (the window is kept, never
+        recreated) and repaint the delegate-drawn rows."""
+        self._apply_style()
+        self.list.viewport().update()
 
     # ── results ───────────────────────────────────────────────────────────────
     def _refresh(self):

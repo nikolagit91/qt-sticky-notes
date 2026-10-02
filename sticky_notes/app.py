@@ -480,6 +480,9 @@ class StickyNotesApp(StorageMixin, SettingsMixin, TrayMixin, QApplication):
         if self._manager is not None and hasattr(self._manager, "retheme"):
             mgr = self._manager
             QTimer.singleShot(0, lambda m=mgr: self._run_if_alive(m, m.retheme))
+        palette = getattr(self, "_search_palette", None)
+        if palette is not None:
+            QTimer.singleShot(0, lambda w=palette: self._run_if_alive(w, w.retheme))
         self._update_tray_icon(name == "dark")
 
     @staticmethod
