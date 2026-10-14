@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PyQt6.QtWidgets import QMessageBox
 QMessageBox.information = staticmethod(lambda *a, **k: None)
-from PyQt6.QtCore import Qt, QMimeData
+from PyQt6.QtCore import Qt, QMimeData, QPoint
 from PyQt6.QtGui import QTextCursor
 
 fails = []
@@ -46,6 +46,49 @@ f = char_at(te, 4)                            # first pasted char 'X'
 check("pasted char is monospace", CODE_FONT_FAMILY in (f.fontFamilies() or []))
 check("pasted char keeps the inline-code background",
       f.background().style() != Qt.BrushStyle.NoBrush)
+
+# ── The pasted run must carry the SAME transparent marker as typed/toggled
+#    inline code — the visible chip is painted in paintEvent. A real tinted
+#    background made Qt paint it natively UNDER the painted chip → the pasted
+#    part came out darker than the rest of the span (double tint).
+check("pasted char carries the transparent inline marker (alpha 0)",
+      f.background().color().alpha() == 0)
+
+def chip_pixels(note, positions):
+    """Rendered chip colour above the glyphs at each char position. Grabbed from
+    the whole NOTE: the editor viewport is see-through, so grabbing it alone
+    returns transparent pixels instead of what is on screen."""
+    te = note.text_edit
+    te.viewport().update(); app.processEvents()
+    img = note.grab().toImage()
+    rect = te._inline_run_rects()[0]
+    out = []
+    for pos in positions:
+        c = QTextCursor(te.document()); c.setPosition(pos)
+        pt = te.viewport().mapTo(note, QPoint(te.cursorRect(c).x() + 3, int(rect.top()) + 2))
+        out.append(img.pixelColor(pt.x(), pt.y()).name())
+    return out
+
+def html_paste(te, text):
+    """Like copying from a web page: rich HTML plus the plain-text flavour."""
+    md = QMimeData(); md.setHtml(f"<span style='color:#202124'>{text}</span>"); md.setText(text)
+    te.insertFromMimeData(md)
+
+for label, do_paste in (("plain-text paste", paste), ("web (HTML) paste", html_paste)):
+    n3 = StickyNote(app, label, {"id": label, "geometry": [0, 0, 360, 200], "color": "#fff59d"})
+    n3.show(); app.processEvents()
+    t3 = n3.text_edit
+    c = t3.textCursor(); c.insertText("inline")
+    c = t3.textCursor(); c.select(QTextCursor.SelectionType.Document); t3.setTextCursor(c)
+    t3.toggle_inline_code()
+    c = t3.textCursor(); c.setPosition(3); t3.setTextCursor(c)    # caret INSIDE the span: "inl|ine"
+    do_paste(t3, "PASTED")
+    check(f"{label}: text lands inside the span", t3.document().toPlainText() == "inlPASTEDine")
+    before, pasted, after = chip_pixels(n3, (1, 5, 10))
+    check(f"{label}: chip under pasted text matches the original part ({pasted} vs {before})",
+          pasted == before)
+    check(f"{label}: chip after the paste matches too ({after} vs {before})", after == before)
+    n3.hide(); n3.deleteLater()
 
 # ── Regression: pasting on a PLAIN line stays clean (not forced inline).
 note2 = StickyNote(app, "b", {"id": "b", "geometry": [0, 0, 300, 200]})

@@ -612,7 +612,7 @@ class NoteTextEdit(QTextEdit):
         if source.hasText() and self._is_inline_code(cursor.charFormat()):
             f = QTextCharFormat()
             f.setFontFamilies([CODE_FONT_FAMILY])
-            f.setBackground(self.inline_bg_color)
+            f.setBackground(_CODE_MARK_BG)     # transparent marker; chip drawn in paintEvent
             cursor.insertText(source.text(), f)   # replaces any selection
             self.setTextCursor(cursor)
             return
@@ -1214,42 +1214,59 @@ class NoteTextEdit(QTextEdit):
             bstart = b.position()
             lx = layout.position().x() - hscroll        # layout x -> viewport x
             in_code = self._is_code_block(b)
+            # Merge ADJACENT inline fragments into one run. Qt starts a new
+            # fragment wherever the char format differs at all — e.g. text pasted
+            # into a span vs text typed in it, or a bold word inside it. One chip
+            # per fragment put two rounded chips edge to edge: notches top and
+            # bottom where the corners met, an overlap in the middle.
+            runs = []
             it = b.begin()
             while not it.atEnd():
                 frag = it.fragment()
                 if frag.isValid() and self._is_inline_code(frag.charFormat()):
-                    s = frag.position()
-                    e = s + frag.length()
-                    fm = QFontMetricsF(frag.charFormat().font())
-                    pos = s
-                    while pos < e:
-                        ln = layout.lineForTextPosition(pos - bstart)
-                        if not ln.isValid():
-                            break
-                        seg_end = min(e, bstart + ln.textStart() + ln.textLength())
-                        if seg_end <= pos:
-                            break
-                        r1 = self._caret_rect(pos)               # vertical extent only
-                        # Both edges ON this visual line: also correct when the run
-                        # wraps (cursorRect(seg_end) would jump to the next line).
-                        x0 = lx + ln.cursorToX(pos - bstart)[0]
-                        x1 = lx + ln.cursorToX(seg_end - bstart)[0]
-                        # Ink edges = advance box minus the side bearing. A space has
-                        # no ink (Qt reports rightBearing ~ its whole advance), so
-                        # using its bearing ended the chip BEFORE a trailing space —
-                        # the space typed in inline mode looked un-chipped until the
-                        # next letter. Whitespace counts as its full advance box.
-                        c0 = doc.characterAt(pos)
-                        c1 = doc.characterAt(seg_end - 1)
-                        ink_left = x0 + (0.0 if c0.isspace() else fm.leftBearing(c0))
-                        ink_right = x1 - (0.0 if c1.isspace() else fm.rightBearing(c1))
-                        left = ink_left - CODE_INLINE_PAD_X
-                        right = ink_right + CODE_INLINE_PAD_X
-                        out.append((QRectF(left, r1.top(), right - left, r1.height()), in_code))
-                        pos = seg_end
+                    fs, fe = frag.position(), frag.position() + frag.length()
+                    if runs and runs[-1][1] == fs:
+                        runs[-1][1] = fe
+                    else:
+                        runs.append([fs, fe])
                 it += 1
+            for s, e in runs:
+                pos = s
+                while pos < e:
+                    ln = layout.lineForTextPosition(pos - bstart)
+                    if not ln.isValid():
+                        break
+                    seg_end = min(e, bstart + ln.textStart() + ln.textLength())
+                    if seg_end <= pos:
+                        break
+                    r1 = self._caret_rect(pos)               # vertical extent only
+                    # Both edges ON this visual line: also correct when the run
+                    # wraps (cursorRect(seg_end) would jump to the next line).
+                    x0 = lx + ln.cursorToX(pos - bstart)[0]
+                    x1 = lx + ln.cursorToX(seg_end - bstart)[0]
+                    # Ink edges = advance box minus the side bearing. A space has
+                    # no ink (Qt reports rightBearing ~ its whole advance), so
+                    # using its bearing ended the chip BEFORE a trailing space —
+                    # the space typed in inline mode looked un-chipped until the
+                    # next letter. Whitespace counts as its full advance box.
+                    # Bearings from each EDGE char's own font: a merged run
+                    # can mix fragments (e.g. a bold edge letter).
+                    c0 = doc.characterAt(pos)
+                    c1 = doc.characterAt(seg_end - 1)
+                    ink_left = x0 + (0.0 if c0.isspace() else self._char_metrics(pos).leftBearing(c0))
+                    ink_right = x1 - (0.0 if c1.isspace() else self._char_metrics(seg_end - 1).rightBearing(c1))
+                    left = ink_left - CODE_INLINE_PAD_X
+                    right = ink_right + CODE_INLINE_PAD_X
+                    out.append((QRectF(left, r1.top(), right - left, r1.height()), in_code))
+                    pos = seg_end
             b = b.next()
         return out
+
+    def _char_metrics(self, pos):
+        """Font metrics of the character AT `pos` (its own char format)."""
+        c = QTextCursor(self.document()); c.setPosition(pos)
+        c.setPosition(pos + 1, QTextCursor.MoveMode.KeepAnchor)
+        return QFontMetricsF(c.charFormat().font())
 
     def _caret_rect(self, pos):
         c = QTextCursor(self.document()); c.setPosition(pos)
