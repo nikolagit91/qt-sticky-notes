@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QMessageBox, QSystemTrayIcon, QMenu, QTabWidget, QTabBar, QListWidget,
     QTextEdit, QToolTip, QSlider, QTimeEdit, QFrame,
 )
-from PyQt6.QtCore import Qt, QTimer, QTime, QUrl, QSize
+from PyQt6.QtCore import Qt, QTimer, QTime, QUrl, QSize, QEvent
 from PyQt6.QtGui import QFont, QFontDatabase, QPixmapCache, QDesktopServices
 from PyQt6 import sip
 
@@ -32,6 +32,7 @@ from .theme import (
 from .note import StickyNote
 from .manager import NotesManager
 from .ipc import SingleInstance
+from . import x11
 from .reminders import ReminderScheduler
 from .theme_schedule import ThemeScheduler, coerce_hhmm, scheduled_theme_now
 from .i18n import tr, set_language, LANGUAGES
@@ -185,6 +186,12 @@ class StickyNotesApp(StorageMixin, SettingsMixin, TrayMixin, QApplication):
         self._reminders.start()
         self._theme_scheduler = ThemeScheduler(self)
         self._theme_scheduler.start()
+
+        # Notes fronted by the last tray scroll-up; a click on one drops the rest
+        # (see _start_tray_raise_session).
+        self._tray_raised = []
+        self._tray_filter_on = False
+        self.applicationStateChanged.connect(self._on_app_state_changed)
 
         if "--new-note" in argv:
             # Cold start triggered by the global hotkey (app wasn't running yet):
@@ -533,6 +540,7 @@ class StickyNotesApp(StorageMixin, SettingsMixin, TrayMixin, QApplication):
         leader, undoing the per-note detach). Same surface pattern the search
         palette uses, and it never recreates the window."""
         try:
+            self._make_focusable(widget)     # a dropped note can't be activated otherwise
             widget.show()
             self._ensure_on_screen(widget)   # rescue notes stranded on an unplugged monitor
             widget.raise_()
@@ -554,11 +562,104 @@ class StickyNotesApp(StorageMixin, SettingsMixin, TrayMixin, QApplication):
         always-on-top so they're left untouched; hidden notes stay hidden (this
         does NOT un-hide anything or change any persisted state). Uses the same
         per-note bring-to-front as Show All, which reliably fronts notes above
-        other windows on GNOME. Dropping notes back behind a window is left to
-        the user (click a work window) — that is the only reliable path here."""
+        other windows on GNOME. Clicking one of them then drops the others back
+        behind other windows (_start_tray_raise_session); clicking a work window
+        drops them all, as before."""
+        raised = []
         for n in self.notes.values():
             if not n._hidden and not n._pinned:
                 self._bring_to_front(n)
+                raised.append(n)
+        self._start_tray_raise_session(raised)
+
+    # ── tray raise: click one note, the others drop behind ───────────────────
+    # Spiked on the user's GNOME (2026-10-13), judged by eye + focus logs:
+    #   * clicking one raised note → lowering the OTHERS works;
+    #   * after the user leaves for another app, lowering the note they had
+    #     used works too — but only via EWMH (see x11.restack_below); a plain
+    #     lower() is ignored once our app is no longer active;
+    #   * NOT fixable here: minimizing the front app makes GNOME hand focus to
+    #     the most-recently-used window — the note — and raise it again.
+    def _start_tray_raise_session(self, notes):
+        """Remember the notes this raise fronted. A mouse press on one of them
+        drops the others; leaving the app drops them all. The trigger is a
+        press, not window activation: the raise itself activates every note in
+        turn. The app-wide event filter is only installed for the session —
+        permanently, every event would cross into Python."""
+        self._tray_raised = list(notes)
+        self._update_press_filter()
+
+    def _end_tray_raise_session(self):
+        self._tray_raised = []
+        self._update_press_filter()
+
+    def _update_press_filter(self):
+        """The app-wide press listener is needed while a raise session runs OR
+        while any note is unfocusable (a click must make it focusable again)."""
+        needed = bool(self._tray_raised) or any(
+            getattr(n, "_unfocusable", False) for n in self.notes.values())
+        if needed and not self._tray_filter_on:
+            self.installEventFilter(self)
+            self._tray_filter_on = True
+        elif not needed and self._tray_filter_on:
+            self.removeEventFilter(self)
+            self._tray_filter_on = False
+
+    def _drop_note(self, note):
+        """Send one note to the bottom of the stack (behind every app window)
+        and make it unfocusable, so GNOME's focus hand-off on minimize skips it
+        (see x11.set_focusable). It becomes focusable again on a click on it,
+        on _bring_to_front and when its reminder fires."""
+        try:
+            wid = int(note.winId())
+            if not x11.restack_below(wid):
+                note.lower()          # off X11: best effort
+                return
+            if x11.set_focusable(wid, False):
+                note._unfocusable = True
+                self._update_press_filter()
+        except RuntimeError:
+            pass                      # note deleted meanwhile
+
+    def _make_focusable(self, note):
+        """Undo _drop_note's unfocusable state — call BEFORE activating a note."""
+        if not getattr(note, "_unfocusable", False):
+            return
+        try:
+            x11.set_focusable(int(note.winId()), True)
+        except RuntimeError:
+            pass
+        note._unfocusable = False
+        self._update_press_filter()
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.MouseButtonPress and isinstance(obj, QWidget):
+            clicked = obj.window()
+            if getattr(clicked, "_unfocusable", False):
+                # A dropped note is unfocusable: the click alone won't focus it.
+                self._make_focusable(clicked)
+                clicked.raise_()
+                clicked.activateWindow()
+            if clicked in self._tray_raised:
+                for n in self._tray_raised:
+                    if n is not clicked:
+                        self._drop_note(n)
+        return super().eventFilter(obj, event)
+
+    def _on_app_state_changed(self, state):
+        """The user went to another app → drop every raised note (the one they
+        were editing included), so they all end on the desktop layer, and end
+        the session. Re-checked after a moment: focus moving between our own
+        notes during the raise can blip the app inactive."""
+        if state != Qt.ApplicationState.ApplicationActive and self._tray_raised:
+            QTimer.singleShot(250, self._end_tray_session_if_inactive)
+
+    def _end_tray_session_if_inactive(self):
+        if self.applicationState() != Qt.ApplicationState.ApplicationActive:
+            raised = self._tray_raised
+            self._end_tray_raise_session()
+            for n in raised:
+                self._drop_note(n)
 
     def show_search(self):
         """Open the global quick-search palette (reused across invocations)."""

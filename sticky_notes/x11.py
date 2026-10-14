@@ -22,6 +22,8 @@ _XA_WINDOW = 33
 # XUtil.h: WindowGroupHint = (1L << 6). Marks WM_HINTS.window_group as valid.
 _WINDOW_GROUP_HINT = 1 << 6
 _PROP_MODE_REPLACE = 0
+# XUtil.h: InputHint = (1L << 0). Marks WM_HINTS.input as valid.
+_INPUT_HINT = 1 << 0
 # EWMH _NET_WM_STATE client-message action (root-window message to a mapped win).
 _NET_WM_STATE_REMOVE = 0
 _NET_WM_STATE_ADD = 1
@@ -100,6 +102,12 @@ def _libx11():
         lib.XSendEvent.restype    = ctypes.c_int
         lib.XSendEvent.argtypes   = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int,
                                      ctypes.c_long, ctypes.c_void_p]
+        lib.XGetWMProtocols.restype  = ctypes.c_int
+        lib.XGetWMProtocols.argtypes = [ctypes.c_void_p, ctypes.c_ulong,
+                                        ctypes.POINTER(ctypes.POINTER(ctypes.c_ulong)),
+                                        ctypes.POINTER(ctypes.c_int)]
+        lib.XSetWMProtocols.argtypes = [ctypes.c_void_p, ctypes.c_ulong,
+                                        ctypes.POINTER(ctypes.c_ulong), ctypes.c_int]
         _lib = lib
     return _lib
 
@@ -221,3 +229,85 @@ def set_above(win_id: int, enable: bool) -> bool:
     except Exception:
         return False
 
+
+
+def restack_below(win_id: int) -> bool:
+    """Send a MAPPED window to the bottom of its stacking layer — behind every
+    other application window, just above the desktop — via the EWMH
+    _NET_RESTACK_WINDOW client message with pager source indication.
+
+    Why not QWidget.lower(): measured on the user's GNOME (2026-10-13), Mutter
+    honours a plain client restack (XConfigureWindow stack_mode=Below) only while
+    our app is the active one; once the user has moved to another app it is
+    ignored. The pager-sourced EWMH request is honoured in both cases.
+    Best-effort; no-op off X11 / on error (caller falls back to lower())."""
+    if not win_id:
+        return False
+    try:
+        lib = _libx11()
+        dpy = _disp()
+        ev = _XEvent()
+        ev.xclient.type = _CLIENT_MESSAGE
+        ev.xclient.send_event = 1
+        ev.xclient.display = dpy
+        ev.xclient.window = win_id
+        ev.xclient.message_type = lib.XInternAtom(dpy, b"_NET_RESTACK_WINDOW", False)
+        ev.xclient.format = 32
+        ev.xclient.data[0] = 2          # source indication: pager
+        ev.xclient.data[1] = 0          # no sibling → bottom of the layer
+        ev.xclient.data[2] = 1          # detail: Below
+        ev.xclient.data[3] = 0
+        ev.xclient.data[4] = 0
+        root = lib.XDefaultRootWindow(dpy)
+        mask = _SUBSTRUCTURE_REDIRECT | _SUBSTRUCTURE_NOTIFY
+        lib.XSendEvent(dpy, root, False, mask, ctypes.byref(ev))
+        lib.XFlush(dpy)
+        return True
+    except Exception:
+        return False
+
+
+def set_focusable(win_id: int, focusable: bool) -> bool:
+    """Make a MAPPED window (un)focusable for the window manager: WM_HINTS.input
+    AND the WM_TAKE_FOCUS entry of WM_PROTOCOLS. Used for a note dropped to the
+    bottom of the stack.
+
+    Why both (measured on the user's GNOME, 2026-10-14): minimizing the front
+    app makes Mutter hand focus to the most-recently-used window — a dropped
+    note — and raise it, undoing the drop. With only input=False Mutter stopped
+    focusing the note but still raised it (WM_TAKE_FOCUS keeps it a focus
+    candidate); with WM_TAKE_FOCUS removed too it skipped the note entirely.
+    Restoring both before activating lets the user type in it again.
+    Changed in place — NOT via Qt's WindowDoesNotAcceptFocus flag, which would
+    recreate the native window. Best-effort; no-op off X11 / on error."""
+    if not win_id:
+        return False
+    try:
+        lib = _libx11()
+        dpy = _disp()
+        hints = lib.XGetWMHints(dpy, win_id)
+        if not hints:
+            hints = lib.XAllocWMHints()
+            if not hints:
+                return False
+        hints.contents.flags |= _INPUT_HINT
+        hints.contents.input = 1 if focusable else 0
+        lib.XSetWMHints(dpy, win_id, hints)
+        lib.XFree(hints)
+
+        take_focus = lib.XInternAtom(dpy, b"WM_TAKE_FOCUS", False)
+        arr = ctypes.POINTER(ctypes.c_ulong)()
+        n = ctypes.c_int(0)
+        atoms = []
+        if lib.XGetWMProtocols(dpy, win_id, ctypes.byref(arr), ctypes.byref(n)):
+            atoms = [arr[i] for i in range(n.value)]
+            lib.XFree(arr)
+        atoms = [a for a in atoms if a != take_focus]
+        if focusable:
+            atoms.append(take_focus)
+        buf = (ctypes.c_ulong * len(atoms))(*atoms)
+        lib.XSetWMProtocols(dpy, win_id, buf, len(atoms))
+        lib.XFlush(dpy)
+        return True
+    except Exception:
+        return False

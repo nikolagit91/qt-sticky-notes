@@ -115,6 +115,7 @@ class StickyNote(NoteDialogsMixin, QWidget):
         self._qcolor_grip   = self._qcolor_base.darker(180)   # overwritten by _apply_ink
         self._initializing = True
         self._clean_mode = False        # global auto-hide-chrome mode (set via _set_clean_mode)
+        self._unfocusable = False       # dropped by the tray raise: WM focus off until picked (app._drop_note)
         self._chrome_revealed = True     # is the header currently shown?
         self._toolbar_pref = True        # user's toolbar choice, remembered across clean mode
         self._save_timer = QTimer(self)
@@ -854,6 +855,7 @@ class StickyNote(NoteDialogsMixin, QWidget):
         except RuntimeError:
             return
         self.app_ref._ensure_on_screen(self)
+        self.app_ref._make_focusable(self)       # a dropped note can't be activated otherwise
         x11.set_above(int(self.winId()), True)   # surface above other on-top windows
         self.raise_()
         self.activateWindow()

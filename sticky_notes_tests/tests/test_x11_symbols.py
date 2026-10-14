@@ -29,7 +29,7 @@ check(f"_libx11() loads without error (got: {err!r})", err is None)
 # Every symbol we declared must actually be resolvable in libX11.
 for sym in ("XOpenDisplay", "XInternAtom", "XChangeProperty", "XGetWMHints",
             "XAllocWMHints", "XSetWMHints", "XFree", "XFlush",
-            "XDefaultRootWindow", "XSendEvent"):
+            "XDefaultRootWindow", "XSendEvent", "XGetWMProtocols", "XSetWMProtocols"):
     ok = True
     try:
         getattr(x11._libx11(), sym)
@@ -42,6 +42,8 @@ for call, label in [
     (lambda: x11.detach_window_group(123), "detach_window_group"),
     (lambda: x11.set_skip_taskbar(123),    "set_skip_taskbar"),
     (lambda: x11.set_above(123, True),     "set_above"),
+    (lambda: x11.restack_below(123),       "restack_below"),
+    (lambda: x11.set_focusable(123, False), "set_focusable"),
 ]:
     ok = True
     try:
