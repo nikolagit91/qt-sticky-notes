@@ -142,6 +142,22 @@ check("…and keeps the session (a click still drops the others)", set(dropped) 
 leave_app()
 dropped.clear()
 
+# ── Show All starts the SAME session (tray menu, Manager button, tray click
+#    and a second launch all go through show_all_notes). It also un-hides
+#    hidden notes; pinned notes are fronted but never dropped.
+E._hidden = True
+app.show_all_notes()
+check("Show All un-hides the hidden note", E._hidden is False)
+press(A.text_edit.viewport())
+check(f"after Show All, clicking A drops the other non-pinned notes ({len(dropped)} drops)",
+      set(dropped) == {B, C, E} and D not in dropped)
+dropped.clear()
+leave_app()
+check("after Show All, leaving the app drops every shown non-pinned note",
+      set(dropped) == {A, B, C, E} and D not in dropped)
+dropped.clear()
+E._hidden = True
+
 # ── the app-wide event filter only lives for a session
 check("event filter removed once the session ends", app._tray_filter_on is False)
 

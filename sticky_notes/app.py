@@ -549,11 +549,14 @@ class StickyNotesApp(StorageMixin, SettingsMixin, TrayMixin, QApplication):
             pass
 
     def show_all_notes(self):
-        """Manager has last word — show every note regardless of pin or lock state."""
+        """Manager has last word — show every note regardless of pin or lock state.
+        Then behaves like the tray raise: clicking one shown note drops the
+        others, leaving the app drops them all (pinned notes stay on top)."""
         for n in self.notes.values():
             n.set_hidden(False)
         self.save_notes()          # persist so they stay shown across restarts
         self._refresh_manager()
+        self._start_tray_raise_session([n for n in self.notes.values() if not n._pinned])
 
     def raise_visible_notes(self):
         """Bring every visible (non-hidden), non-pinned note to the front.
@@ -581,7 +584,7 @@ class StickyNotesApp(StorageMixin, SettingsMixin, TrayMixin, QApplication):
     #   * NOT fixable here: minimizing the front app makes GNOME hand focus to
     #     the most-recently-used window — the note — and raise it again.
     def _start_tray_raise_session(self, notes):
-        """Remember the notes this raise fronted. A mouse press on one of them
+        """Remember the notes this raise (tray scroll-up or Show All) fronted. A mouse press on one of them
         drops the others; leaving the app drops them all. The trigger is a
         press, not window activation: the raise itself activates every note in
         turn. The app-wide event filter is only installed for the session —
