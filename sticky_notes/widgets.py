@@ -6,7 +6,7 @@ import subprocess
 import time
 from contextlib import contextmanager
 
-from PyQt6.QtWidgets import QTextEdit, QFrame, QWidget, QApplication, QPushButton
+from PyQt6.QtWidgets import QTextEdit, QFrame, QWidget, QApplication, QPushButton, QMessageBox
 from PyQt6.QtCore import Qt, QUrl, QPoint, QRect, QRectF, QSize, pyqtSignal, QTimer
 from PyQt6.QtGui import (
     QTextBlockFormat, QTextCharFormat, QTextFormat, QColor, QDesktopServices,
@@ -41,7 +41,12 @@ CHECK_HREF  = "x-sticky-check"
 # checkbox flush at the edge".
 LIST_INDENT_WIDTH = 22          # was Qt's default 40 — brings bullets in
 CHECK_LEFT_MARGIN = 10          # base inset for checklist lines (was flush at 0)
-_CHECK_DONE_COLOR = "#9aa0a6"
+_CHECK_DONE_COLOR = "#9aa0a6"   # LEGACY done grey (items ticked before 2026-10-15)
+# A done item keeps its own colour, faded: rgba round-trips through the saved
+# HTML, so unticking can restore the colour exactly (a fixed grey destroyed it).
+# A little stronger on dark notes, where a faded colour loses contrast fastest.
+_DONE_ALPHA      = 120
+_DONE_ALPHA_DARK = 165
 _DRAG_LINE_COLOR  = "#2f6fed"   # insertion line during a checklist drag (UI accent)
 
 CODE_FONT_FAMILY = "Monospace"   # code-block glyphs; system resolves it
@@ -543,8 +548,11 @@ class NoteTextEdit(QTextEdit):
                 # Drop the link's colour too, or text typed after a link (and the
                 # next line after Enter) comes out in link blue/violet/amber.
                 # CLEAR rather than set: the text then falls back to the note's
-                # default ink, which follows auto-contrast.
-                fmt.clearForeground()
+                # default ink, which follows auto-contrast. Only a LINK colour,
+                # though: a colour the user just picked here sits in this same
+                # format and must survive.
+                if fmt.foreground().color().name().lower() in self._LINK_COLOR_SET:
+                    fmt.clearForeground()
                 cursor.setCharFormat(fmt)
                 moved = True
             if moved:
@@ -940,6 +948,18 @@ class NoteTextEdit(QTextEdit):
                       QTextCursor.MoveMode.KeepAnchor)
         self.setTextCursor(c)
 
+    def open_link(self, href: str):
+        """Open a clicked link. A local file/folder that no longer exists
+        (renamed, moved, deleted) gets a message instead: xdg-open fails on it
+        (exit code 4) with its output silenced, so the click looked dead."""
+        url = QUrl(href)
+        if url.isLocalFile() and not os.path.exists(url.toLocalFile()):
+            QMessageBox.warning(self.window(), tr("File not found"),
+                                tr("This file or folder no longer exists:")
+                                + "\n" + url.toLocalFile())
+            return
+        _open_url(href)
+
     def inputMethodEvent(self, event):
         # IME input (e.g. č/ć composed via IBus) bypasses keyPressEvent, so the
         # checked-row lock has to be enforced here too.
@@ -1034,7 +1054,7 @@ class NoteTextEdit(QTextEdit):
                     block = self.cursorForPosition(pos).block()
                     self.toggle_checkbox(block.position())
                 elif href:
-                    _open_url(href)
+                    self.open_link(href)
         self._reset_drag()
 
     def mouseMoveEvent(self, event):
@@ -1405,14 +1425,42 @@ class NoteTextEdit(QTextEdit):
                        QTextCursor.MoveMode.KeepAnchor, 1)
         c.insertText(CHECK_DONE if checked else CHECK_EMPTY, box_fmt)
         skip = 2 if (len(text) > 1 and text[1] == " ") else 1
-        body = QTextCursor(doc)
-        body.setPosition(start + skip)
-        body.movePosition(QTextCursor.MoveOperation.EndOfBlock,
-                          QTextCursor.MoveMode.KeepAnchor)
-        fmt = QTextCharFormat()
-        fmt.setFontStrikeOut(checked)
-        fmt.setForeground(QColor(_CHECK_DONE_COLOR if checked else self.checkbox_text_color))
-        body.mergeCharFormat(fmt)
+        self._set_done_look(block, start + skip, checked)
+
+    def _set_done_look(self, block, body_start: int, done: bool):
+        """Strike + fade (done) or un-strike + restore (not done) the text of
+        `block` from body_start on. Per run, so every colour in the item
+        survives: done = same RGB at the done alpha; not done = full alpha again
+        (a legacy grey run → the ink). A run with no colour of its own is drawn
+        in the ink, so done fades the ink; not done leaves it as it is."""
+        body = QTextCursor(self.document())
+        body_end = block.position() + block.length() - 1
+        runs, it = [], block.begin()
+        while not it.atEnd():
+            f = it.fragment()
+            a, b = max(f.position(), body_start), min(f.position() + f.length(), body_end)
+            if a < b:
+                runs.append((a, b, f.charFormat().foreground()))
+            it += 1
+        for a, b, brush in runs:
+            fmt = QTextCharFormat()
+            fmt.setFontStrikeOut(done)
+            own = brush.style() != Qt.BrushStyle.NoBrush
+            col = QColor(brush.color()) if own else QColor(self.checkbox_text_color)
+            if done:
+                col.setAlpha(self._done_alpha())
+                fmt.setForeground(col)
+            elif own:
+                if col.name() == _CHECK_DONE_COLOR:
+                    col = QColor(self.checkbox_text_color)
+                col.setAlpha(255)
+                fmt.setForeground(col)
+            body.setPosition(a)
+            body.setPosition(b, QTextCursor.MoveMode.KeepAnchor)
+            body.mergeCharFormat(fmt)
+
+    def _done_alpha(self) -> int:
+        return _DONE_ALPHA_DARK if self.link_dark else _DONE_ALPHA
 
     def toggle_checkbox(self, block_pos: int):
         """Toggle a box with cascade: checking/unchecking an item forces its whole
@@ -1489,14 +1537,9 @@ class NoteTextEdit(QTextEdit):
                 c.movePosition(QTextCursor.MoveOperation.NextCharacter,
                                QTextCursor.MoveMode.KeepAnchor, skip)
                 c.removeSelectedText()
-                line = QTextCursor(doc)
-                line.setPosition(block.position())
-                line.movePosition(QTextCursor.MoveOperation.EndOfBlock,
-                                  QTextCursor.MoveMode.KeepAnchor)
-                clear = QTextCharFormat()
-                clear.setFontStrikeOut(False)
-                clear.setForeground(QColor(self.checkbox_text_color))
-                line.mergeCharFormat(clear)
+                # Un-strike/un-fade, keeping the text's own colours (setting the
+                # ink here wiped a user's red off the line).
+                self._set_done_look(doc.findBlock(block.position()), block.position(), False)
         self._reconcile_checklist()   # new/removed items re-parent neighbours
         cur.endEditBlock()
         self._apply_check_margins()
@@ -1919,7 +1962,10 @@ class NoteTextEdit(QTextEdit):
         """Recolour default-coloured checklist glyphs and text from old_hex to
         new_hex so boxes and text stay readable when the note's ink flips (a dark
         note needs light boxes/text). Only chars matching the old default are
-        touched — done-item grey and any user-picked colours are left alone."""
+        touched — done-item grey and any user-picked colours are left alone.
+        Matched by RGB, keeping each char's alpha, so a DONE item's faded ink
+        follows too; done fades are re-set to the note's current done alpha
+        (call after link_dark is updated)."""
         old, new = QColor(old_hex), QColor(new_hex)
         if old == new:
             return
@@ -1936,8 +1982,18 @@ class NoteTextEdit(QTextEdit):
                     c = QTextCursor(doc)
                     c.setPosition(start + i)
                     c.setPosition(start + i + 1, QTextCursor.MoveMode.KeepAnchor)
-                    if c.charFormat().foreground().color() == old:
+                    col = c.charFormat().foreground().color()
+                    if col.name() == old.name():
+                        nf = QColor(new)
+                        nf.setAlpha(col.alpha())
+                        if col.alpha() < 255:
+                            nf.setAlpha(self._done_alpha())
+                        fmt.setForeground(nf)
                         c.mergeCharFormat(fmt)
+                    elif col.alpha() < 255 and b.text()[:1] == CHECK_DONE:
+                        col.setAlpha(self._done_alpha())   # user colour, faded
+                        f2 = QTextCharFormat(); f2.setForeground(col)
+                        c.mergeCharFormat(f2)
             b = b.next()
         edit.endEditBlock()
 

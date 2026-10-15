@@ -81,7 +81,32 @@ f = te.currentCharFormat()
 check("typing right after a link doesn't come out link-coloured",
       f.foreground().color().name() != _LINK_COLOR_WEB)
 
+# ── a colour the USER picks right after a link is kept (2026-10-15) ──────────
+# Only a recognised LINK colour may be cleared; clearing every foreground also
+# threw away a colour just picked from the toolbar (it lands in the same
+# anchor-carrying typing format), so the text came out in the note's ink.
+te.clear(); paste_link(); caret_to_end()
+n._apply_text_color("#c62828")
+te.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_A,
+                           Qt.KeyboardModifier.NoModifier, "a"))
+app.processEvents()
+c = QTextCursor(te.document()); c.movePosition(QTextCursor.MoveOperation.End)
+f = c.charFormat()
+check("colour picked right after a link: typed text uses it",
+      f.foreground().color().name() == "#c62828")
+check("colour picked right after a link: typed text is not a link", not f.isAnchor())
+
+te.clear(); paste_link(); caret_to_end()
+n._apply_text_color("#c62828")
+key(Qt.Key.Key_Return)
+f = te.currentCharFormat()
+check("colour picked right after a link: survives Enter to a new line",
+      f.foreground().color().name() == "#c62828" and not f.isAnchor())
+
 # ── the link itself keeps its colour ────────────────────────────────────────
+te.clear(); paste_link(); caret_to_end()
+te.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_A,
+                           Qt.KeyboardModifier.NoModifier, "a"))
 doc = te.document()
 c = QTextCursor(doc); c.setPosition(1)
 check("the link text itself is still link-coloured",

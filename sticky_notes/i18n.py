@@ -58,6 +58,10 @@ def tr(text: str) -> str:
 # ---------------------------------------------------------------------------
 _TRANSLATIONS = {
     "de": {
+        # ---- link to a missing file/folder ----
+        "File not found": "Datei nicht gefunden",
+        "This file or folder no longer exists:": "Diese Datei oder dieser Ordner existiert nicht mehr:",
+
         # ---- generic actions / buttons ----
         "OK": "OK",
         "Cancel": "Abbrechen",
@@ -449,6 +453,10 @@ _TRANSLATIONS = {
         "PNG image (*.png)": "PNG-Bild (*.png)",
     },
     "es": {
+        # ---- link to a missing file/folder ----
+        "File not found": "Archivo no encontrado",
+        "This file or folder no longer exists:": "Este archivo o carpeta ya no existe:",
+
         # ---- generic actions / buttons ----
         "OK": "Aceptar",
         "Cancel": "Cancelar",
@@ -839,6 +847,10 @@ _TRANSLATIONS = {
         "PNG image (*.png)": "Imagen PNG (*.png)",
     },
     "fr": {
+        # ---- link to a missing file/folder ----
+        "File not found": "Fichier introuvable",
+        "This file or folder no longer exists:": "Ce fichier ou dossier n'existe plus :",
+
         'OK': 'OK',
         'Cancel': 'Annuler',
         'Save': 'Enregistrer',
@@ -1102,6 +1114,10 @@ _TRANSLATIONS = {
         'PNG image (*.png)': 'Image PNG (*.png)',
     },
     "hr": {
+        # ---- link to a missing file/folder ----
+        "File not found": "Datoteka nije pronađena",
+        "This file or folder no longer exists:": "Ova datoteka ili mapa više ne postoji:",
+
         # ---- generic actions / buttons ----
         "OK": "U redu",
         "Cancel": "Odustani",
@@ -1489,6 +1505,10 @@ _TRANSLATIONS = {
         "PNG image (*.png)": "PNG slika (*.png)",
     },
     "ru": {
+        # ---- link to a missing file/folder ----
+        "File not found": "Файл не найден",
+        "This file or folder no longer exists:": "Этот файл или папка больше не существует:",
+
         'OK': 'ОК',
         'Cancel': 'Отмена',
         'Save': 'Сохранить',
@@ -1753,6 +1773,10 @@ _TRANSLATIONS = {
     },
 
     "zh": {
+        # ---- link to a missing file/folder ----
+        "File not found": "未找到文件",
+        "This file or folder no longer exists:": "此文件或文件夹已不存在：",
+
         'OK': '确定',
         'Cancel': '取消',
         'Save': '保存',
@@ -2016,6 +2040,10 @@ _TRANSLATIONS = {
         'PNG image (*.png)': 'PNG 图片 (*.png)',
     },
     "pt": {
+        # ---- link to a missing file/folder ----
+        "File not found": "Arquivo não encontrado",
+        "This file or folder no longer exists:": "Este arquivo ou pasta não existe mais:",
+
         # ---- generic actions / buttons ----
         "OK": "OK",
         "Cancel": "Cancelar",
@@ -2375,6 +2403,10 @@ _TRANSLATIONS = {
         "PNG image (*.png)": "Imagem PNG (*.png)",
     },
     "it": {
+        # ---- link to a missing file/folder ----
+        "File not found": "File non trovato",
+        "This file or folder no longer exists:": "Questo file o cartella non esiste più:",
+
         # ---- generic actions / buttons ----
         "OK": "OK",
         "Cancel": "Annulla",
@@ -2765,6 +2797,10 @@ _TRANSLATIONS = {
         "PNG image (*.png)": "Immagine PNG (*.png)",
     },
     "pl": {
+        # ---- link to a missing file/folder ----
+        "File not found": "Nie znaleziono pliku",
+        "This file or folder no longer exists:": "Ten plik lub folder już nie istnieje:",
+
         # ---- generic actions / buttons ----
         "OK": "OK",
         "Cancel": "Anuluj",
@@ -3159,6 +3195,10 @@ _TRANSLATIONS = {
     },
 
     "ja": {
+        # ---- link to a missing file/folder ----
+        "File not found": "ファイルが見つかりません",
+        "This file or folder no longer exists:": "このファイルまたはフォルダーはもう存在しません:",
+
         # ---- generic actions / buttons ----
         "OK": "OK",
         "Cancel": "キャンセル",

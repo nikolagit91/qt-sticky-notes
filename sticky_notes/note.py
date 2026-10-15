@@ -49,7 +49,13 @@ def _skips_checked_rows(method):
     @functools.wraps(method)
     def wrapper(self, *args, **kwargs):
         with self.text_edit.checked_rows_frozen():
-            return method(self, *args, **kwargs)
+            result = method(self, *args, **kwargs)
+        # The action's own toolbar refresh ran BEFORE the checked rows were put
+        # back — re-read if the selection starts in/touches one.
+        cur = self.text_edit.textCursor()
+        if cur.hasSelection() and self.text_edit.touches_locked_check(cur):
+            self._update_toolbar_state()
+        return result
     return wrapper
 
 
@@ -585,11 +591,11 @@ class StickyNote(NoteDialogsMixin, QWidget):
         # existing default-coloured ones, so boxes stay visible on dark notes.
         old_box = self.text_edit.checkbox_text_color
         self.text_edit.checkbox_text_color = ink.text
+        self.text_edit.link_dark = ink.dark   # before recolor_checklist: done fade depends on it
         self.text_edit.recolor_checklist(old_box, ink.text)
         # Links carry an explicit colour, so they don't follow the QTextEdit
         # default either — repoint them at the light/dark variant for this note
         # (fixed colours were unreadable on dark fills).
-        self.text_edit.link_dark = ink.dark
         self.text_edit.recolor_links()
         self.text_edit.code_bg_color = ink.code_bg
         self.text_edit.code_fg_color = ink.code_fg
@@ -619,7 +625,7 @@ class StickyNote(NoteDialogsMixin, QWidget):
         for s in (self._sep1, self._sep2, self._sep3, self._sep4):
             s.setStyleSheet(sep_style(ink))
         self.btn_font_family.setStyleSheet(family_btn_style(ink))
-        self.btn_text_color.setStyleSheet(text_color_btn_style(ink, self._text_color))
+        self._refresh_text_color_btn(self._toolbar_fmt())
         self.check_progress.setStyleSheet(progress_label_style(ink))
 
         # Text-glyph header buttons (keep their individual font sizes).
@@ -1093,15 +1099,17 @@ class StickyNote(NoteDialogsMixin, QWidget):
     @_skips_checked_rows
     def _apply_text_color(self, hex_color: str):
         self._text_color = hex_color
-        self.text_edit.checkbox_text_color = hex_color
-        self.btn_text_color.setStyleSheet(
-            text_color_btn_style(note_ink(self._qcolor_base), hex_color))
+        # NOT checkbox_text_color: that is the note's DEFAULT checklist ink, which
+        # recolor_checklist uses to tell default text from user colours — writing
+        # the pick there made the user's colour "default" (reset on the next
+        # note-colour/theme change) and leaked it into every new checklist item.
         self.text_edit.setFocus()
         fmt = QTextCharFormat()
         fmt.setForeground(QColor(hex_color))
         # Skip link characters — recolouring a link would strip the cue that
         # tells the user it IS a link, while it still opens on click.
         self.text_edit.merge_format_preserving_links(fmt)
+        self._update_toolbar_state(prefer_current=True)
 
     def _toggle_checklist(self):
         """Toolbar ☑ button: toggle checklist boxes on the current line/selection."""
@@ -1645,6 +1653,27 @@ class StickyNote(NoteDialogsMixin, QWidget):
         TYPED NEXT — so the button flips IMMEDIATELY instead of only once you type
         the next character (the left-of-caret char is still the old run)."""
         cursor = self.text_edit.textCursor()
+        fmt = self._toolbar_fmt(prefer_current)
+
+        self.btn_bold.setChecked(fmt.fontWeight() >= QFont.Weight.DemiBold)
+        self.btn_italic.setChecked(fmt.fontItalic())
+        self.btn_underline.setChecked(fmt.fontUnderline())
+        self.btn_strike.setChecked(fmt.fontStrikeOut())
+        self.btn_bullet.setChecked(bool(cursor.currentList()))
+        self.btn_code.setChecked(self.text_edit._is_code_block(cursor.block()))
+        self.btn_inline_code.setChecked(self.text_edit._is_inline_code(fmt))
+        size = self._effective_point_size(fmt)
+        self.font_size_label.setText(str(size))
+        # Reflect the cursor's font family on the family button too.
+        family = fmt.fontFamilies()
+        if family:
+            self._current_font_family = family[0]
+            self.btn_font_family.setText(family[0].split()[0][:6])
+        self._refresh_text_color_btn(fmt)
+
+    def _toolbar_fmt(self, prefer_current=False):
+        """The char format the toolbar reflects — see _update_toolbar_state."""
+        cursor = self.text_edit.textCursor()
         if cursor.hasSelection():
             # Reflect the FIRST selected character. currentCharFormat() reads the
             # format AT the selection end, which for a line-select sits in the
@@ -1667,21 +1696,22 @@ class StickyNote(NoteDialogsMixin, QWidget):
             fmt = probe.charFormat()
         else:
             fmt = self.text_edit.currentCharFormat()
+        return fmt
 
-        self.btn_bold.setChecked(fmt.fontWeight() >= QFont.Weight.DemiBold)
-        self.btn_italic.setChecked(fmt.fontItalic())
-        self.btn_underline.setChecked(fmt.fontUnderline())
-        self.btn_strike.setChecked(fmt.fontStrikeOut())
-        self.btn_bullet.setChecked(bool(cursor.currentList()))
-        self.btn_code.setChecked(self.text_edit._is_code_block(cursor.block()))
-        self.btn_inline_code.setChecked(self.text_edit._is_inline_code(fmt))
-        size = self._effective_point_size(fmt)
-        self.font_size_label.setText(str(size))
-        # Reflect the cursor's font family on the family button too.
-        family = fmt.fontFamilies()
-        if family:
-            self._current_font_family = family[0]
-            self.btn_font_family.setText(family[0].split()[0][:6])
+    def _refresh_text_color_btn(self, fmt):
+        """The "A" shows the text colour at the caret / selection start, like the
+        rest of the toolbar: the char's own colour, else the note's ink (text with
+        no colour of its own is drawn in it — so never black on a dark note).
+        Links and checklist boxes don't count: an anchor's colour marks the
+        anchor, and the picker never recolours links."""
+        ink = note_ink(self._qcolor_base,
+                       auto=getattr(self.app_ref, "_auto_contrast", True))
+        if not fmt.isAnchor() and fmt.foreground().style() != Qt.BrushStyle.NoBrush:
+            colour = fmt.foreground().color().name()
+        else:
+            colour = ink.text
+        self._text_color = colour      # also what the picker marks as current
+        self.btn_text_color.setStyleSheet(text_color_btn_style(ink, colour))
 
     # ── Note options menu ─────────────────────────────────────────────────────
     def _open_note_menu(self):

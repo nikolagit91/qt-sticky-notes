@@ -113,11 +113,39 @@ def to_odt(document, path: str) -> None:
     if df.pointSize() <= 0 and df.pixelSize() > 0:
         df.setPointSizeF(df.pixelSize() * 72.0 / 96.0)
     doc.setDefaultFont(df)
+    _flatten_alpha(doc)
 
     writer = QTextDocumentWriter(path)
     writer.setFormat(b"ODF")           # force ODF regardless of the file extension
     if not writer.write(doc):
         raise RuntimeError(f"Could not write {path}")
+
+
+def _flatten_alpha(doc, paper: str = "#ffffff") -> None:
+    """ODF has no alpha: a translucent text colour (a done checklist item keeps
+    its own colour, faded) would be written at FULL strength. Pre-blend it onto
+    the page colour in the cloned document so it still reads as faded."""
+    from PyQt6.QtGui import QTextCursor, QTextCharFormat
+    bg = QColor(paper)
+    blk = doc.firstBlock()
+    while blk.isValid():
+        it = blk.begin()
+        while not it.atEnd():
+            frag = it.fragment()
+            br = frag.charFormat().foreground()
+            col = br.color()
+            if br.style() != Qt.BrushStyle.NoBrush and col.alpha() < 255:
+                a = col.alphaF()
+                flat = QColor(round(col.red() * a + bg.red() * (1 - a)),
+                              round(col.green() * a + bg.green() * (1 - a)),
+                              round(col.blue() * a + bg.blue() * (1 - a)))
+                cf = QTextCharFormat(); cf.setForeground(flat)
+                cur = QTextCursor(doc)
+                cur.setPosition(frag.position())
+                cur.setPosition(frag.position() + frag.length(), QTextCursor.MoveMode.KeepAnchor)
+                cur.mergeCharFormat(cf)
+            it += 1
+        blk = blk.next()
 
 
 def _restore_code_fills(doc, ink) -> None:
