@@ -384,6 +384,10 @@ class NoteDialogsMixin:
         dlg.move(x, y)
         dlg.exec()
         dlg.deleteLater()
+        # btn_bullet is checkable, so the click that opened this already flipped
+        # it; dismissed without a choice, nothing re-synced it (and the outside
+        # click is eaten by the popup, so the caret didn't move either).
+        self._update_toolbar_state()
 
     def _open_font_size_entry(self):
         """Popup with a number field — sets the selection (or the typing format)
