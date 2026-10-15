@@ -1,12 +1,10 @@
-"""Guard: text typed into a CHECKED checklist item must be struck through (and
-dimmed), and land in the right place — including when the item was empty and was
-ticked by clicking its box (which leaves the caret on the box glyph).
+"""Guard: ticking an item by its box moves the caret to the END of the line, so
+the next key continues from there (Enter → a fresh item below) instead of
+landing before the box; typing into an UNCHECKED item is never struck; and a
+fresh item made below a done one isn't struck either.
 
-Two coupled behaviours:
-  * toggle_checkbox moves the caret to the end of the toggled line, so typing
-    continues the item after "☑ " instead of before the box.
-  * typing on a done line is forced struck (Qt would otherwise inherit the
-    un-struck format of the box/space to the caret's left).
+(Typing INTO a checked item used to be allowed and forced struck; since
+2026-10-14 a checked row is locked — test_checklist_checked_locked.py.)
 """
 import sys, os, tempfile, atexit, shutil
 _SB = tempfile.mkdtemp(prefix="sn_test_")
@@ -59,9 +57,11 @@ te.setPlainText(""); c = te.textCursor(); c.setPosition(0); te.setTextCursor(c)
 te.toggle_checklist()                                        # "☐ "
 c = te.textCursor(); c.setPosition(doc.findBlockByNumber(0).position()); te.setTextCursor(c)
 te.toggle_checkbox(doc.findBlockByNumber(0).position())      # tick + caret → end of line
+check("tick moves the caret to the end of the line",
+      te.textCursor().position() == doc.findBlockByNumber(0).position() + len(line(0)))
 type_("milk")
-check("empty-then-tick: text lands after the box (☑ milk)", line(0) == f"{CHECK_DONE} milk")
-check("empty-then-tick: typed text is struck", body_struck(0) is True)
+check("empty-then-tick: typing into the (locked) done item is refused",
+      line(0) == f"{CHECK_DONE} ")
 
 # ── 2) an UNCHECKED item: typed text is NOT struck ────────────────────────────
 te.setPlainText(""); c = te.textCursor(); c.setPosition(0); te.setTextCursor(c)
@@ -71,12 +71,11 @@ type_("bread")
 check("unchecked item: text lands after the box (☐ bread)", line(0) == f"{CHECK_EMPTY} bread")
 check("unchecked item: typed text is NOT struck", body_struck(0) is False)
 
-# ── 3) type in a done item, Enter → fresh unchecked item, type → not struck ───
+# ── 3) done item + Enter → fresh unchecked item below, typed text not struck ──
 te.setPlainText(""); c = te.textCursor(); c.setPosition(0); te.setTextCursor(c)
 te.toggle_checklist()
-c = te.textCursor(); c.setPosition(doc.findBlockByNumber(0).position()); te.setTextCursor(c)
-te.toggle_checkbox(doc.findBlockByNumber(0).position())
 type_("done")
+te.toggle_checkbox(doc.findBlockByNumber(0).position())     # tick → caret to the end
 te._handle_checklist_enter()                                 # new unchecked item below
 type_("todo")
 check("done line still struck", body_struck(0) is True)

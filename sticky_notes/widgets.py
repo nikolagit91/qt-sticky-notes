@@ -4,13 +4,14 @@ import os
 import re
 import subprocess
 import time
+from contextlib import contextmanager
 
 from PyQt6.QtWidgets import QTextEdit, QFrame, QWidget, QApplication, QPushButton
 from PyQt6.QtCore import Qt, QUrl, QPoint, QRect, QRectF, QSize, pyqtSignal, QTimer
 from PyQt6.QtGui import (
     QTextBlockFormat, QTextCharFormat, QTextFormat, QColor, QDesktopServices,
     QTextCursor, QPainter, QPen, QPixmap, QAction, QKeySequence, QBrush, QIcon,
-    QTextListFormat, QFontMetricsF,
+    QTextListFormat, QFontMetricsF, QDragLeaveEvent,
 )
 
 from .i18n import tr
@@ -203,6 +204,7 @@ class NoteTextEdit(QTextEdit):
         self._dbl_ms = 0.0               # last double-click time (for triple-click detection)
         self._dbl_pos = QPoint()
         self._drag_block = None  # block number being drag-reordered (from its box)
+        self._locked_drag = False  # press inside a selection touching a checked row
         self._dragging = False
         self._drag_span = None   # (first, last) block range dragged (subtree)
         self._drag_overlay = None
@@ -317,8 +319,14 @@ class NoteTextEdit(QTextEdit):
                 cb()
                 return
 
-        # Checklist editing keys: indent (Tab), reorder (Alt+↑/↓), and whole-row
-        # delete on a checked item. Only act on checklist lines / when editable.
+        # A checked (☑) row is locked: typing/cutting into it is swallowed and any
+        # delete that reaches it removes the whole row. Before the checklist keys
+        # so Backspace/Delete on a checked row never fall through to them.
+        if not self.isReadOnly() and self._handle_locked_check_keys(event):
+            return
+
+        # Checklist editing keys: indent (Tab), reorder (Alt+↑/↓), and the
+        # unchecked-marker guard. Only act on checklist lines / when editable.
         if not self.isReadOnly() and self._handle_checklist_keys(event):
             return
 
@@ -411,25 +419,6 @@ class NoteTextEdit(QTextEdit):
                 self.setTextCursor(cursor)
                 return
 
-        # Text typed into a DONE checklist item is struck + dimmed like the rest of
-        # the item. Qt derives the typing format from the character left of the
-        # caret (the box glyph / its trailing space — not struck), so force it here
-        # for printable input; without it, typing into a checked item (especially an
-        # empty one just ticked) came in un-struck.
-        if (not self.isReadOnly() and event.text() and event.text() >= " "
-                and not (mods & (Qt.KeyboardModifier.ControlModifier
-                                 | Qt.KeyboardModifier.AltModifier
-                                 | Qt.KeyboardModifier.MetaModifier))
-                and not self.textCursor().hasSelection()):
-            blk = self.textCursor().block()
-            if self._is_check_line(blk.text()) and blk.text()[:1] == CHECK_DONE:
-                cur2 = self.textCursor()
-                fmt = cur2.charFormat()
-                fmt.setFontStrikeOut(True)
-                fmt.setForeground(QColor(_CHECK_DONE_COLOR))
-                cur2.insertText(event.text(), fmt)
-                self.setTextCursor(cur2)
-                return
         super().keyPressEvent(event)
 
     # ── Links are atomic / non-editable ─────────────────────────────────────────
@@ -595,6 +584,8 @@ class NoteTextEdit(QTextEdit):
 
     def insertFromMimeData(self, source):
         cursor = self.textCursor()
+        if self.touches_locked_check(cursor):
+            return   # a checked row is locked — nothing is pasted/dropped into it
 
         # Paste inside a code block → keep it all code (plain, monospace, on the
         # code background). Must run before the link/url/rich handling below, which
@@ -870,6 +861,8 @@ class NoteTextEdit(QTextEdit):
         if src is None or not src.hasText():
             return
         cursor = self.textCursor()
+        if self.touches_locked_check(cursor):
+            return   # a checked row is locked
         # In a code block, keep the paste all-code (same as the rich paste path).
         if self._is_code_block(self.document().findBlock(cursor.selectionStart())):
             self._insert_code_text(cursor, src.text())
@@ -894,10 +887,15 @@ class NoteTextEdit(QTextEdit):
         # "Paste as plain text" right after the normal Paste, so the user can
         # pick formatted paste (the default) or clean unformatted text per paste.
         menu = self.createStandardContextMenu()
+        locked = not self.isReadOnly() and self.touches_locked_check()
+        if locked:   # a checked row is locked: copy yes, cut/paste/delete no
+            for a in menu.actions():
+                if a.objectName() in ("edit-cut", "edit-paste", "edit-delete"):
+                    a.setEnabled(False)
         if not self.isReadOnly():
             plain = QAction(tr("Paste as plain text"), menu)
             cb = QApplication.clipboard().mimeData()
-            plain.setEnabled(bool(cb) and cb.hasText())
+            plain.setEnabled(bool(cb) and cb.hasText() and not locked)
             plain.triggered.connect(self.paste_as_plain_text)
             # Show shortcut hints that match the keys (Ctrl+V = plain, Ctrl+Shift+V
             # = formatted). These are display-only here — the menu is transient, so
@@ -942,6 +940,37 @@ class NoteTextEdit(QTextEdit):
                       QTextCursor.MoveMode.KeepAnchor)
         self.setTextCursor(c)
 
+    def inputMethodEvent(self, event):
+        # IME input (e.g. č/ć composed via IBus) bypasses keyPressEvent, so the
+        # checked-row lock has to be enforced here too.
+        if (not self.isReadOnly() and (event.commitString() or event.preeditString())
+                and self.touches_locked_check()):
+            event.accept()
+            return
+        super().inputMethodEvent(event)
+
+    def _drop_on_locked(self, event) -> bool:
+        p = self.cursorForPosition(event.position().toPoint()).position()
+        return self._is_locked_block(self.document().findBlock(p))
+
+    def dragMoveEvent(self, event):
+        # Hovering a drag over a checked row: no drop there (no-drop cursor, and
+        # clear Qt's drop-caret feedback instead of drawing it inside the row).
+        if not self.isReadOnly() and self._drop_on_locked(event):
+            super().dragLeaveEvent(QDragLeaveEvent())
+            event.ignore()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        # Belt and braces for dragMoveEvent: Qt REMOVES a moved selection before
+        # inserting it, so a refused insert must be caught before that.
+        if not self.isReadOnly() and self._drop_on_locked(event):
+            super().dragLeaveEvent(QDragLeaveEvent())
+            event.ignore()
+            return
+        super().dropEvent(event)
+
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._dbl_ms = time.monotonic() * 1000.0
@@ -953,6 +982,7 @@ class NoteTextEdit(QTextEdit):
         # a drag — links open / boxes toggle only on a clean click. A press that
         # lands on a checkbox also primes a possible drag-reorder of that line.
         left = (event.button() == Qt.MouseButton.LeftButton)
+        self._locked_drag = False
         # Triple-click (a left press right after a double-click, same spot) → select
         # just the line's text, so the caret stays put and per-line toggles don't
         # reach the line below. Handled globally here, not per feature.
@@ -970,6 +1000,13 @@ class NoteTextEdit(QTextEdit):
         self._dragging = False
         if left and not self.isReadOnly():
             pt = event.position().toPoint()
+            # A press inside a selection that touches a checked row would start
+            # a text drag (a MOVE takes the text out of the locked row).
+            cur = self.textCursor()
+            hit = self.cursorForPosition(pt).position()
+            self._locked_drag = (cur.hasSelection()
+                                 and cur.selectionStart() <= hit < cur.selectionEnd()
+                                 and self.touches_locked_check(cur))
             if self.anchorAt(pt) == CHECK_HREF:
                 self._drag_block = self.cursorForPosition(pt).block().blockNumber()
         super().mousePressEvent(event)
@@ -1030,6 +1067,8 @@ class NoteTextEdit(QTextEdit):
         # nothing in the note revealed the real destination before the click.
         # The checkbox glyph is an anchor too — it is not a link, so no tooltip.
         self.viewport().setToolTip(href if on_link and href != CHECK_HREF else "")
+        if self._locked_drag and (event.buttons() & Qt.MouseButton.LeftButton):
+            return   # no text drag out of a checked row (see mousePressEvent)
         super().mouseMoveEvent(event)
 
     def leaveEvent(self, event):
@@ -1904,8 +1943,9 @@ class NoteTextEdit(QTextEdit):
 
     def _handle_checklist_keys(self, event) -> bool:
         """Keys that act on a checklist line: Alt+↑/↓ reorders, Tab/Shift+Tab
-        indents/outdents (sub-items), and Backspace/Delete on a *checked* item
-        removes the whole row. Returns True when handled."""
+        indents/outdents (sub-items), and Backspace/Delete never eat an unchecked
+        item's marker. (Deleting a *checked* item is _handle_locked_check_keys.)
+        Returns True when handled."""
         cur = self.textCursor()
         block = cur.block()
         if not self._is_check_line(block.text()):
@@ -1920,10 +1960,6 @@ class NoteTextEdit(QTextEdit):
             return True
         if key == Qt.Key.Key_Backtab:
             self._change_indent(block, -1)
-            return True
-        if (key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete)
-                and not cur.hasSelection() and block.text()[:1] == CHECK_DONE):
-            self._delete_whole_line(block)
             return True
         # Unchecked item: treat the box like a list marker. On an EMPTY item either
         # key drops the box and the line goes plain (mirrors Enter). While the line
@@ -1942,6 +1978,178 @@ class NoteTextEdit(QTextEdit):
                     else cur.position() < limit):
                 return True          # protect the marker; the text stays put
         return False
+
+    # ── checked rows are locked ─────────────────────────────────────────────────
+    # A ticked item is "done": its text is frozen until it's unticked (click the
+    # box). Typing, paste, cut, IME, drop and drag-out are refused; any delete
+    # that reaches the row removes it WHOLE, never leaving a bare "☑ " box or a
+    # cut-off "☑ mli". Structure stays free — Enter at its end/start, Tab,
+    # Alt+↑/↓, drag-reorder by the box.
+    def _is_locked_block(self, block) -> bool:
+        return block.isValid() and block.text()[:1] == CHECK_DONE
+
+    def _locked_blocks_touching(self, start: int, end: int):
+        """Checked rows the range [start, end] touches, edges INCLUDED: a caret
+        anywhere on the row (box and end too), or a selection that merely ends at
+        the row's start / begins at its end — replacing that selection would
+        remove the line break and merge text into the row."""
+        out = []
+        b = self.document().findBlock(start)
+        while b.isValid() and b.position() <= end:
+            if self._is_locked_block(b):
+                out.append(b)
+            b = b.next()
+        return out
+
+    def touches_locked_check(self, cursor=None) -> bool:
+        cur = cursor or self.textCursor()
+        return bool(self._locked_blocks_touching(cur.selectionStart(), cur.selectionEnd()))
+
+    @contextmanager
+    def checked_rows_frozen(self):
+        """Run a formatting action without it touching checked rows: snapshot
+        each checked row's block format, block char format and every fragment's
+        char format, let the action run, then put them back — so select-all +
+        Bold/colour/font/size/code/bullet formats everything else. Formatting
+        never changes the text, so the saved positions stay valid (checked, and
+        skipped if not). One edit block → one undo step."""
+        doc = self.document()
+        saved = []
+        b = doc.begin()
+        while b.isValid():
+            if self._is_locked_block(b):
+                frags, it = [], b.begin()
+                while not it.atEnd():
+                    f = it.fragment()
+                    frags.append((f.position(), f.length(), QTextCharFormat(f.charFormat())))
+                    it += 1
+                saved.append((b.position(), QTextBlockFormat(b.blockFormat()),
+                              QTextCharFormat(b.charFormat()), frags))
+            b = b.next()
+        if not saved:
+            yield
+            return
+        size = doc.characterCount()
+        edit = QTextCursor(doc)
+        edit.beginEditBlock()
+        try:
+            yield
+        finally:
+            if doc.characterCount() == size:
+                for pos, bf, bcf, frags in saved:
+                    c = QTextCursor(doc)
+                    c.setPosition(pos)
+                    lst = c.block().textList()
+                    if lst is not None:          # a bullet action listed the row
+                        lst.remove(c.block())
+                    c.setBlockFormat(bf)
+                    c.setBlockCharFormat(bcf)
+                    for p, n, cf in frags:
+                        c.setPosition(p)
+                        c.setPosition(p + n, QTextCursor.MoveMode.KeepAnchor)
+                        c.setCharFormat(cf)
+                self._reflow_code_spacing()      # a code block split by a checked row
+            edit.endEditBlock()
+            self.viewport().update()
+
+    def _handle_locked_check_keys(self, event) -> bool:
+        """Key handling for checked rows. Returns True when the key was handled
+        (or swallowed); False lets it through — also for every key that doesn't
+        touch a checked row, and for navigation/copy/undo/Tab/Alt+↑↓ on one."""
+        SK = QKeySequence.StandardKey
+        key, mods = event.key(), event.modifiers()
+        cur = self.textCursor()
+        if (key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete)
+                or event.matches(SK.DeleteStartOfWord) or event.matches(SK.DeleteEndOfWord)
+                or event.matches(SK.DeleteEndOfLine)):
+            if event.matches(SK.Cut):            # Shift+Delete is Cut, not a delete
+                return self.touches_locked_check()
+            backward = key == Qt.Key.Key_Backspace or event.matches(SK.DeleteStartOfWord)
+            return self._delete_touching_locked(cur, backward)
+        if not self.touches_locked_check():
+            return False
+        if event.matches(SK.Cut):
+            return True
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            # Only a caret at the row's end (fresh item below) or at its start, up
+            # to the box (row pushed down) — _handle_checklist_enter does those.
+            # Anywhere else Enter would split the frozen text; Shift+Enter would
+            # put a line break inside it.
+            if cur.hasSelection() or (mods & Qt.KeyboardModifier.ShiftModifier):
+                return True
+            blk = cur.block()
+            text = blk.text()
+            skip = 2 if text[1:2] == " " else 1
+            p = cur.position()
+            return not (p == blk.position() + len(text) or p <= blk.position() + skip)
+        ctrl_only = (mods & Qt.KeyboardModifier.ControlModifier
+                     and not mods & Qt.KeyboardModifier.AltModifier)
+        if event.text() and event.text().isprintable() and not ctrl_only:
+            return True                          # typing into a checked row
+        return False
+
+    def _delete_touching_locked(self, cur, backward: bool) -> bool:
+        """Backspace/Delete-like keys. No selection: on a checked row → delete the
+        row; merging a NON-empty neighbour into one → refused (an empty neighbour
+        line may go: Qt then keeps the checked row's format). With a selection:
+        any checked row it overlaps is taken whole; one it only touches at an edge
+        is left alone (the selection is trimmed off that line break)."""
+        doc = self.document()
+        if not cur.hasSelection():
+            blk = cur.block()
+            if self._is_locked_block(blk):
+                self._delete_whole_line(blk)
+                return True
+            p = cur.position()
+            if backward and p == blk.position():
+                return self._is_locked_block(blk.previous()) and blk.text() != ""
+            if not backward and p == blk.position() + blk.length() - 1:
+                return self._is_locked_block(blk.next()) and blk.text() != ""
+            return False
+        s, e = cur.selectionStart(), cur.selectionEnd()
+        if not self._locked_blocks_touching(s, e):
+            return False
+        whole = []                               # checked rows taken whole
+        changed = True
+        while changed:                           # widening can reach the next row
+            changed = False
+            for b in self._locked_blocks_touching(s, e):
+                bs, be = b.position(), b.position() + b.length() - 1
+                if s < be and e > bs:            # overlaps the row → take it whole
+                    if s > bs or e < be:
+                        s, e = min(s, bs), max(e, be)
+                        changed = True
+                    if b.blockNumber() not in whole:
+                        whole.append(b.blockNumber())
+                elif s < e and e == bs:          # ends at its start: keep the break
+                    e -= 1
+                    changed = True
+                elif s < e and s == be:          # starts at its end: keep the break
+                    s += 1
+                    changed = True
+        if s >= e:
+            return True                          # nothing deletable is left
+        first, last = doc.findBlock(s), doc.findBlock(e)
+        if (len(whole) == 1 and first.blockNumber() == last.blockNumber() == whole[0]
+                and s == first.position() and e == first.position() + first.length() - 1):
+            self._delete_whole_line(first)       # just this row: promotes its children
+            return True
+        if whole and s == first.position() and e == last.position() + last.length() - 1:
+            # Whole lines: take one line break too, or an empty line is left.
+            if e < doc.characterCount() - 1:
+                e += 1
+            elif s > 0:
+                s -= 1
+        c = QTextCursor(doc)
+        c.beginEditBlock()
+        c.setPosition(s)
+        c.setPosition(e, QTextCursor.MoveMode.KeepAnchor)
+        c.removeSelectedText()
+        self._reconcile_checklist()
+        c.endEditBlock()
+        self.setTextCursor(c)
+        self._apply_check_margins()
+        return True
 
     def _drop_check_marker(self, block):
         """Turn a checklist line back into a plain line: remove the "☐ " marker,
@@ -2071,6 +2279,7 @@ class NoteTextEdit(QTextEdit):
 
     def _reset_drag(self):
         self._press_pos = None
+        self._locked_drag = False
         self._drag_block = None
         self._dragging = False
         self._drag_span = None

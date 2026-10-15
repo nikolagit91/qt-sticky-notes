@@ -1,5 +1,6 @@
 """The StickyNote widget — a single draggable, editable, frameless note window."""
 
+import functools
 import uuid
 import datetime
 import os
@@ -40,6 +41,16 @@ from . import export
 from . import x11
 from . import snap as snaplib
 from .i18n import tr
+
+
+def _skips_checked_rows(method):
+    """Formatting actions leave checked (locked) checklist rows as they are —
+    see NoteTextEdit.checked_rows_frozen."""
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self.text_edit.checked_rows_frozen():
+            return method(self, *args, **kwargs)
+    return wrapper
 
 
 # Consistent typography for the note's own dialogs (reminder, rename) so they
@@ -1033,9 +1044,17 @@ class StickyNote(NoteDialogsMixin, QWidget):
 
         # charFormat() returns format of the character BEFORE the cursor position,
         # so we set the cursor to pos+1 to check the character at pos.
+        # Checked rows are skipped: formatting never reaches them (they're
+        # locked), so counting them made "all bold?" always False and a second
+        # press re-applied Bold instead of turning it off. Line breaks too: they
+        # carry no visible format, and pos+1 there reads the NEXT line's first
+        # character — a checked row's box, again never bold.
         doc = self.text_edit.document()
         c   = QTextCursor(doc)
         for pos in range(cursor.selectionStart(), cursor.selectionEnd()):
+            if (doc.characterAt(pos) == " "
+                    or self.text_edit._is_locked_block(doc.findBlock(pos))):
+                continue
             c.setPosition(pos + 1)
             fmt = c.charFormat()
             if prop == "bold"      and fmt.fontWeight() < QFont.Weight.DemiBold: return False
@@ -1057,6 +1076,7 @@ class StickyNote(NoteDialogsMixin, QWidget):
 
 
 
+    @_skips_checked_rows
     def _apply_font_family(self, family: str):
         self._current_font_family = family
         self.text_edit.code_revert_family = family
@@ -1070,6 +1090,7 @@ class StickyNote(NoteDialogsMixin, QWidget):
         self.text_edit.setTextCursor(cursor)
 
 
+    @_skips_checked_rows
     def _apply_text_color(self, hex_color: str):
         self._text_color = hex_color
         self.text_edit.checkbox_text_color = hex_color
@@ -1089,6 +1110,7 @@ class StickyNote(NoteDialogsMixin, QWidget):
         self.text_edit.toggle_checklist()
         self._update_check_progress()
 
+    @_skips_checked_rows
     def _toggle_code_block(self):
         if self.locked:
             return   # locked = read-only; the { } button is hidden then, guard the key too
@@ -1107,6 +1129,7 @@ class StickyNote(NoteDialogsMixin, QWidget):
         if getattr(self.app_ref, "_code_blocks", False):
             self._toggle_inline_code()
 
+    @_skips_checked_rows
     def _toggle_inline_code(self):
         self.text_edit.toggle_inline_code()
         # prefer_current so the button reflects the NEW typing format immediately
@@ -1369,6 +1392,7 @@ class StickyNote(NoteDialogsMixin, QWidget):
                 "QPushButton { color: rgba(85,85,85,100); }"
             )
 
+    @_skips_checked_rows
     def _fmt_underline(self):
         self.text_edit.setFocus()
         fmt = QTextCharFormat()
@@ -1378,6 +1402,7 @@ class StickyNote(NoteDialogsMixin, QWidget):
         self.text_edit.merge_format_preserving_links(fmt)
         self._update_toolbar_state(prefer_current=True)
 
+    @_skips_checked_rows
     def _fmt_bold(self):
         self.text_edit.setFocus()
         cursor = self.text_edit.textCursor()
@@ -1387,6 +1412,7 @@ class StickyNote(NoteDialogsMixin, QWidget):
         self.text_edit.setTextCursor(cursor)
         self._update_toolbar_state(prefer_current=True)
 
+    @_skips_checked_rows
     def _fmt_italic(self):
         self.text_edit.setFocus()
         cursor = self.text_edit.textCursor()
@@ -1396,6 +1422,7 @@ class StickyNote(NoteDialogsMixin, QWidget):
         self.text_edit.setTextCursor(cursor)
         self._update_toolbar_state(prefer_current=True)
 
+    @_skips_checked_rows
     def _fmt_strike(self):
         self.text_edit.setFocus()
         cursor = self.text_edit.textCursor()
@@ -1415,6 +1442,7 @@ class StickyNote(NoteDialogsMixin, QWidget):
     ]
 
 
+    @_skips_checked_rows
     def _fmt_bullet(self, style=None):
         """Apply a list style, or remove the list when style is None."""
         try:
@@ -1475,6 +1503,7 @@ class StickyNote(NoteDialogsMixin, QWidget):
         except Exception as e:
             print(f"[bullet] error: {e}")
 
+    @_skips_checked_rows
     def _apply_font_size(self, size: int, cursor=None):
         """Set an ABSOLUTE point size on `cursor`'s selection (or on the typing
         format if it has none). Bullet/number markers on touched blocks scale to
@@ -1508,6 +1537,7 @@ class StickyNote(NoteDialogsMixin, QWidget):
         self.text_edit.setTextCursor(keep)
         self.text_edit.setFocus()
 
+    @_skips_checked_rows
     def _change_font_size(self, delta: int):
         """▲▼ buttons: shift the size by ±delta RELATIVE to each run's OWN size.
         A mixed-size selection (e.g. a pasted heading + body) therefore keeps its
