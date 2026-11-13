@@ -17,7 +17,7 @@ from PyQt6.QtGui import QFont, QTextCharFormat, QTextCursor, QColor
 
 from .i18n import tr
 from .theme import (
-    UI, _btn_primary, _btn_secondary,
+    UI, _btn_primary, _btn_secondary, note_ink,
 )
 
 def _dialog_style() -> str:
@@ -299,15 +299,60 @@ class NoteDialogsMixin:
             }}
         """)
 
-        grid = QGridLayout(dlg)
-        grid.setContentsMargins(10, 10, 10, 10)
+        outer = QVBoxLayout(dlg)
+        outer.setContentsMargins(10, 10, 10, 10)
+        outer.setSpacing(6)
+        grid = QGridLayout()
         grid.setSpacing(2)
         cols = 4
+
+        # "Default colour" takes the text's own colour off, so it follows the
+        # note's ink again (#333333 on a light note, #f0f0f0 on a dark one —
+        # NOT the black swatch). Its swatch shows that ink.
+        is_default = getattr(self, "_text_color_default", False)
+        ink = note_ink(self._qcolor_base,
+                       auto=getattr(self.app_ref, "_auto_contrast", True))
+        default_btn = QPushButton()
+        default_btn.setObjectName("default_text_color")
+        default_btn.setFixedHeight(28)
+        default_btn.setToolTip(tr("Default colour"))
+        row = QHBoxLayout(default_btn)
+        row.setContentsMargins(6, 0, 6, 0)
+        row.setSpacing(8)
+        swatch = QLabel()
+        swatch.setFixedSize(16, 16)
+        swatch.setStyleSheet(f"background: {ink.text}; border: 1px solid {UI.BORDER};"
+                             " border-radius: 3px;")
+        label = QLabel(tr("Default colour"))
+        label.setStyleSheet(f"color: {UI.TEXT}; background: transparent;")
+        for w in (swatch, label):
+            w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        row.addWidget(swatch)
+        row.addWidget(label, 1)
+        # setFixedHeight already set a minimum size, so Qt won't take the inner
+        # layout's — without this the label is clipped (longer in other languages).
+        default_btn.setMinimumWidth(row.sizeHint().width())
+        border = f"2px solid {UI.TEXT}" if is_default else "1px solid transparent"
+        default_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                border: {border};
+                border-radius: 4px;
+            }}
+            QPushButton:hover {{ border: 2px solid {UI.TEXT_MUTED}; }}
+        """)
+        default_btn.clicked.connect(lambda: (self._apply_default_text_color(), dlg.accept()))
+        outer.addWidget(default_btn)
+        swatches = QHBoxLayout()            # swatch grid keeps its size, centred
+        swatches.addStretch(1)
+        swatches.addLayout(grid)
+        swatches.addStretch(1)
+        outer.addLayout(swatches)
 
         for i, hex_c in enumerate(self.TEXT_COLORS):
             btn = QPushButton()
             btn.setFixedSize(32, 32)
-            is_current = (hex_c == self._text_color)
+            is_current = (not is_default and hex_c == self._text_color)
             border = f"2px solid {UI.TEXT}" if is_current else "1px solid rgba(0,0,0,0.15)"
             if hex_c == "#ffffff":
                 border = f"1px solid {UI.BORDER}"

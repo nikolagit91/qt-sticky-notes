@@ -497,6 +497,43 @@ class NoteTextEdit(QTextEdit):
             pos = run_end
         edit.endEditBlock()
 
+    def clear_foreground_preserving_links(self):
+        """Take the user's text colour OFF the selection (or the typing format), so
+        the text follows the note's ink again — like text that was never
+        coloured. Links are skipped (their colour marks the link, as in
+        merge_format_preserving_links). Inside a code block "no colour" would be
+        the dark note ink on the dark box, so there the code text colour is put
+        back instead. merge can't clear a property, so each char is rebuilt from
+        its own format (as _strip_code_fg does)."""
+        cur = self.textCursor()
+        if not cur.hasSelection():
+            nf = QTextCharFormat(self.currentCharFormat())
+            if self._is_code_block(cur.block()):
+                nf.setForeground(self.code_fg_color)
+            else:
+                nf.clearForeground()
+            self.setCurrentCharFormat(nf)
+            return
+        doc = self.document()
+        start, end = cur.selectionStart(), cur.selectionEnd()
+        edit = QTextCursor(doc)
+        edit.beginEditBlock()
+        for i in range(start, end):
+            if self._href_right(i):
+                continue
+            c = QTextCursor(doc)
+            c.setPosition(i)
+            c.setPosition(i + 1, QTextCursor.MoveMode.KeepAnchor)
+            if c.selectedText() == " ":
+                continue   # block separator — no glyph, leave its format alone
+            nf = QTextCharFormat(c.charFormat())
+            if self._is_code_block(c.block()):
+                nf.setForeground(self.code_fg_color)
+            else:
+                nf.clearForeground()
+            c.setCharFormat(nf)
+        edit.endEditBlock()
+
     def _delete_run(self, run):
         start, end = run
         c = self.textCursor()

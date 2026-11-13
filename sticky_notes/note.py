@@ -361,6 +361,7 @@ class StickyNote(NoteDialogsMixin, QWidget):
         self.btn_text_color = make_fmt_btn("A", tr("Text Colour"))
         self.btn_text_color.setCheckable(False)
         self._text_color = "#000000"   # styled by _apply_ink()
+        self._text_color_default = True   # caret text has no colour of its own
 
         # Font family button
         self._sep4 = make_sep()
@@ -1111,6 +1112,15 @@ class StickyNote(NoteDialogsMixin, QWidget):
         self.text_edit.merge_format_preserving_links(fmt)
         self._update_toolbar_state(prefer_current=True)
 
+    @_skips_checked_rows
+    def _apply_default_text_color(self):
+        """Picker's "Default colour": remove the text's own colour so it follows
+        the note's ink (and its light/dark flip) again. Not the same as black —
+        the default ink is #333333 on a light note, #f0f0f0 on a dark one."""
+        self.text_edit.setFocus()
+        self.text_edit.clear_foreground_preserving_links()
+        self._update_toolbar_state(prefer_current=True)
+
     def _toggle_checklist(self):
         """Toolbar ☑ button: toggle checklist boxes on the current line/selection."""
         if self.locked:
@@ -1708,8 +1718,10 @@ class StickyNote(NoteDialogsMixin, QWidget):
                        auto=getattr(self.app_ref, "_auto_contrast", True))
         if not fmt.isAnchor() and fmt.foreground().style() != Qt.BrushStyle.NoBrush:
             colour = fmt.foreground().color().name()
+            self._text_color_default = False
         else:
             colour = ink.text
+            self._text_color_default = True   # picker marks "Default colour"
         self._text_color = colour      # also what the picker marks as current
         self.btn_text_color.setStyleSheet(text_color_btn_style(ink, colour))
 
