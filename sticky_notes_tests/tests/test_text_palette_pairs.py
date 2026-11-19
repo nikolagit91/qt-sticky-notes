@@ -58,9 +58,10 @@ check("light set has no duplicates", len(set(LIGHT)) == 16)
 check("dark set has no duplicates", len(set(DARK)) == 16)
 check("light and dark sets are disjoint (a colour's side is never ambiguous)",
       not set(LIGHT) & set(DARK))
-check("the first 12 light colours are unchanged (existing text keeps its colour)",
+# yellow/orange replaced 2026-11-19 (test_palette_yellow_orange.py), the rest kept
+check("the first 12 light colours are the original palette (yellow/orange made readable)",
       LIGHT[:12] == ["#000000", "#434343", "#666666", "#999999",
-                     "#e53935", "#e67c13", "#f9a825", "#2e7d32",
+                     "#e53935", "#d04c00", "#957200", "#2e7d32",
                      "#1565c0", "#6a1b9a", "#ad1457", "#00838f"])
 check("old white/pastels are now the dark-note last row",
       DARK[12:] == ["#ffffff", "#fce4ec", "#e8f5e9", "#e3f2fd"])

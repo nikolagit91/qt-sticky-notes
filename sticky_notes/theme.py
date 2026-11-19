@@ -320,20 +320,29 @@ LINK_COLORS = {
 # stores the light side (palette_real), so saving, copying and ODT carry the
 # real colour. The two sides are disjoint and paired 1:1, so a dark-side colour
 # that reaches the document (paste) maps back unambiguously. The light side's first 12 are the
-# original palette (existing text keeps its colour). Dark twins keep the hue
+# original palette except yellow and orange (below). Dark twins keep the hue
 # and clear 4.5:1 on every built-in dark note (the subtle grey ~3.7, mirroring
 # its light twin). The last row was white + pastels on both — invisible on a
 # light note — so the light side got muted tones of the same family.
+# Yellow and orange (2026-11-19) were #f9a825 / #e67c13 — 1.6 / 2.3:1 on light
+# notes; the same hue darkened turned both into one brown, so the hues were
+# pulled apart (gold, red-orange), ≥3.5:1 on every light note. Text in the old
+# shades is moved to the new ones on load/paste (_RETIRED_LIGHT).
 TEXT_PALETTE = [
     ("#000000", "#f5f5f5"), ("#434343", "#d0d0d0"), ("#666666", "#ababab"), ("#999999", "#909090"),
-    ("#e53935", "#f28b82"), ("#e67c13", "#fcad70"), ("#f9a825", "#fdd663"), ("#2e7d32", "#81c995"),
+    ("#e53935", "#f28b82"), ("#d04c00", "#fcad70"), ("#957200", "#fdd663"), ("#2e7d32", "#81c995"),
     ("#1565c0", "#8ab4f8"), ("#6a1b9a", "#c58af9"), ("#ad1457", "#ff8bcb"), ("#00838f", "#78d9ec"),
     ("#4a5560", "#ffffff"), ("#9a3d62", "#fce4ec"), ("#336b50", "#e8f5e9"), ("#37628a", "#e3f2fd"),
 ]
 
 
+# Former light-side colours → their replacement (stored as the new one).
+_RETIRED_LIGHT = {"#f9a825": "#957200", "#e67c13": "#d04c00"}
+
 _PALETTE_TO_DARK  = {l: d for l, d in TEXT_PALETTE}
+_PALETTE_TO_DARK.update({old: _PALETTE_TO_DARK[new] for old, new in _RETIRED_LIGHT.items()})
 _PALETTE_TO_LIGHT = {d: l for l, d in TEXT_PALETTE}
+_PALETTE_TO_LIGHT.update(_RETIRED_LIGHT)
 
 
 def text_palette(dark: bool) -> list:
