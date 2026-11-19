@@ -32,7 +32,7 @@ from .theme import (
     note_ink, effective_note_color, fmt_btn_style, size_label_style, sep_style,
     header_btn_style, family_btn_style, close_btn_style, progress_label_style,
     text_color_btn_style, text_edit_style, menu_style, border_visible,
-    palette_real, palette_display,
+    palette_real, display_colour,
 )
 from .widgets import (NoteTextEdit, NoteHeader, CHECK_EMPTY, CHECK_DONE,
                       LIST_INDENT_WIDTH)
@@ -181,9 +181,9 @@ class StickyNote(NoteDialogsMixin, QWidget):
 
             self._apply_color()
             self._apply_state()
-            # Colours saved by the build that stored dark twins in the document
-            # → their real colour (the highlighter draws the twin).
-            self.text_edit.canonicalize_palette()
+            # Colours saved by builds that wrote the dark-note look into the
+            # document → the light-note look it stores (the highlighter draws).
+            self.text_edit.canonicalize_colours()
 
         # Loading (setHtml + the re-ink/normalize passes) left undo steps: Ctrl+Z
         # right after opening reverted them — links turned Qt-blue #0000ff on a
@@ -468,7 +468,6 @@ class StickyNote(NoteDialogsMixin, QWidget):
         # No horizontal scrollbar either — long lines (code or a long URL) wrap
         # like the rest of the note instead of showing a horizontal scroll strip.
         self.text_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.text_edit.checkbox_text_color = self._text_color
         self.text_edit.note_bg_color = self.color
         self.text_edit.textChanged.connect(lambda: self._save_timer.start(600))
         self.text_edit.textChanged.connect(self._on_text_changed)
@@ -579,7 +578,7 @@ class StickyNote(NoteDialogsMixin, QWidget):
         SVG-icon header buttons (lock/pin/bell/toolbar-toggle) are NOT handled
         here — their colour lives inside the icon, not QSS — and are left as-is
         for a follow-up. Text the user coloured from the palette is DRAWN in the
-        palette twin for this ink (set_palette_dark — display only, the
+        palette twin for this ink (set_display_dark — display only, the
         document keeps the real colour); any other own colour is kept as is."""
         ink = note_ink(self._qcolor_base,
                        auto=getattr(self.app_ref, "_auto_contrast", True))
@@ -590,21 +589,13 @@ class StickyNote(NoteDialogsMixin, QWidget):
 
         self.text_edit.setStyleSheet(text_edit_style(ink))
 
-        # Checklist boxes/text carry an explicit colour (an anchor, so they'd
-        # otherwise be link-blue), so unlike normal text they don't follow the
-        # QTextEdit default. Point them at the ink's text colour and recolour any
-        # existing default-coloured ones, so boxes stay visible on dark notes.
-        old_box = self.text_edit.checkbox_text_color
-        self.text_edit.checkbox_text_color = ink.text
-        self.text_edit.link_dark = ink.dark   # before recolor_checklist: done fade depends on it
-        # Palette colours the user picked are DRAWN as the twin for this ink
-        # (dark note → dark-note variant); the document keeps the real colour.
-        self.text_edit.set_palette_dark(ink.dark)
-        self.text_edit.recolor_checklist(old_box, ink.text)
-        # Links carry an explicit colour, so they don't follow the QTextEdit
-        # default either — repoint them at the light/dark variant for this note
-        # (fixed colours were unreadable on dark fills).
-        self.text_edit.recolor_links()
+        # Links, checklist boxes/ink and palette colours carry an EXPLICIT colour,
+        # so unlike plain text they don't follow the stylesheet ink. The document
+        # stores their light-note look; on a dark note the editor DRAWS the
+        # dark-note look (set_display_dark → _InkHighlighter). Display only: a
+        # flip writes nothing, so Ctrl+Z after the auto theme undoes the user's
+        # own last edit (writing it in left 3 Ctrl+Z traps — measured 2026-11-19).
+        self.text_edit.set_display_dark(ink.dark)
         self.text_edit.code_bg_color = ink.code_bg
         self.text_edit.code_fg_color = ink.code_fg
         self.text_edit.code_revert_family = self._current_font_family
@@ -1732,10 +1723,12 @@ class StickyNote(NoteDialogsMixin, QWidget):
                        auto=getattr(self.app_ref, "_auto_contrast", True))
         own = not fmt.isAnchor() and fmt.foreground().style() != Qt.BrushStyle.NoBrush
         # An explicit colour equal to the ink is the default too: a checklist item
-        # made with Enter carries the ink explicitly (_plain_format).
-        if own and fmt.foreground().color().name() != QColor(ink.text).name():
+        # made with Enter carries the (stored, light-note) ink explicitly.
+        stored = fmt.foreground().color().name()
+        if own and stored not in (QColor(ink.text).name(),
+                                  QColor(self.text_edit.checkbox_text_color).name()):
             # What is DRAWN: a palette colour shows its twin on a dark note.
-            colour = palette_display(fmt.foreground().color().name(), ink.dark)
+            colour = display_colour(stored, ink.dark)
             self._text_color_default = False
         else:
             colour = ink.text

@@ -94,7 +94,7 @@ light_ink = note_ink(QColor(LIGHT)).text.lower()
 check(f"ODT: uncoloured text carries the light-note ink {light_ink}", light_ink in xml)
 check("ODT: picked black stays black", "#000000" in xml)
 fill('<p>vidi <a href="https://example.com">example.com</a></p>')
-n._apply_ink()
+te.canonicalize_colours()      # as LOADING does: the link gets its stored light colour
 export.to_odt(doc, odt)
 xml = zipfile.ZipFile(odt).read("content.xml").decode().lower()
 check("ODT: a link keeps its link colour (not the ink)", "#1a73e8" in xml)

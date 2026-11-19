@@ -90,7 +90,16 @@ setup(); set_base("#2b2b2b")
 check("ink flip to dark: user's red checklist text kept", colour_at(0, 3) == RED)
 check("ink flip to dark: default checklist text follows the new ink",
       colour_at(1, 3) == ink() and ink() != note_ink(QColor("#fff59d")).text)
-check("ink flip to dark: boxes follow the new ink", colour_at(1, 0) == ink())
+def drawn_at(bn, off):
+    """What the editor DRAWS: a flip is display only (2026-11-19) — the box is
+    stored in the light-note ink, the dark note draws the dark-note ink."""
+    b = doc.findBlockByNumber(bn)
+    for r in b.layout().formats():
+        if r.start <= off < r.start + r.length and \
+                r.format.foreground().style() != Qt.BrushStyle.NoBrush:
+            return r.format.foreground().color().name()
+    return colour_at(bn, off)
+check("ink flip to dark: boxes DRAWN in the new ink", drawn_at(1, 0) == ink())
 set_base("#fff59d")
 check("and back to light: red still kept", colour_at(0, 3) == RED)
 

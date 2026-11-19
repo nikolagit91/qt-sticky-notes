@@ -92,9 +92,20 @@ check("…and the item text lost its red", fg_at(boxes()[0] + 2) != RED)
 # ── boxes still toggle and still follow an ink flip ───────────────────────────
 checklist(); select_all(); n._apply_text_color(RED)
 n._qcolor_base = QColor("#2b2b2b"); n._apply_ink(); app.processEvents()
-dark_ink = te.checkbox_text_color.lower()
-check("after a flip to a dark note boxes follow the new ink",
-      dark_ink != ink and all(fg_at(p) == dark_ink for p in boxes()))
+# The box is stored in the light-note ink; the dark note DRAWS the dark-note ink
+# (2026-11-19 — a flip no longer writes into the document).
+from sticky_notes.theme import LIGHT_INK
+def drawn_at(p):
+    blk = doc.findBlock(p); rel = p - blk.position()
+    for r in blk.layout().formats():
+        if r.start <= rel < r.start + r.length and \
+                r.format.foreground().style() != Qt.BrushStyle.NoBrush:
+            return r.format.foreground().color().name().lower()
+    return fg_at(p)
+dark_ink = LIGHT_INK.text.lower()
+check("after a flip to a dark note boxes are DRAWN in the new ink (red never reached them)",
+      dark_ink != ink and all(drawn_at(p) == dark_ink for p in boxes())
+      and all(fg_at(p) == ink for p in boxes()))
 n._qcolor_base = QColor("#fff59d"); n._apply_ink(); app.processEvents()
 
 # ── a real link in the selection is still skipped ────────────────────────────

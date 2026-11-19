@@ -21,7 +21,7 @@ os.makedirs(os.path.join(_SB, ".local", "share", "sticky_notes"), exist_ok=True)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PyQt6.QtWidgets import QMessageBox
-from PyQt6.QtCore import QMimeData, QUrl
+from PyQt6.QtCore import QMimeData, QUrl, Qt
 from PyQt6.QtGui import QTextCursor, QColor
 QMessageBox.information = staticmethod(lambda *a, **k: None)
 
@@ -65,6 +65,24 @@ def first_link_fmt():
             return f
     return None
 
+def first_link_drawn():
+    """The colour the first link is DRAWN in. The document stores the light-note
+    link colour; the editor's highlighter draws the dark-note one on a dark note
+    (2026-11-19 — a flip no longer writes into the document)."""
+    d = te.document()
+    for i in range(d.characterCount() - 1):
+        c = QTextCursor(d); c.setPosition(i)
+        c.setPosition(i + 1, QTextCursor.MoveMode.KeepAnchor)
+        f = c.charFormat()
+        if f.isAnchor() and f.anchorHref().startswith(("http", "file")):
+            blk = d.findBlock(i); rel = i - blk.position()
+            for r in blk.layout().formats():
+                if r.start <= rel < r.start + r.length and \
+                        r.format.foreground().style() != Qt.BrushStyle.NoBrush:
+                    return r.format.foreground().color().name()
+            return f.foreground().color().name()
+    return None
+
 def paste(md):
     te.clear(); app.processEvents()
     te.insertFromMimeData(md); app.processEvents()
@@ -98,18 +116,21 @@ check("light note → light web colour",
       first_link_fmt().foreground().color().name() == link_color("web", False))
 
 n.color = "#2b2b30"; n._apply_color(); app.processEvents()
-check("existing link recoloured for a dark note",
-      first_link_fmt().foreground().color().name() == link_color("web", True))
+check("existing link DRAWN in the dark colour on a dark note",
+      first_link_drawn() == link_color("web", True))
+check("…while the document keeps the light colour (no undo step from a flip)",
+      first_link_fmt().foreground().color().name() == link_color("web", False))
 
 n.color = "#fff59d"; n._apply_color(); app.processEvents()
 check("switching back to a light note restores the light colour",
-      first_link_fmt().foreground().color().name() == link_color("web", False))
+      first_link_drawn() == link_color("web", False))
 
 # a link inserted while the note is dark starts dark
 n.color = "#2b2b30"; n._apply_color(); app.processEvents()
 md = QMimeData(); md.setText("http://example.com"); paste(md)
-check("link inserted on a dark note uses the dark colour",
-      first_link_fmt().foreground().color().name() == link_color("web", True))
+check("link inserted on a dark note is DRAWN dark, stored light",
+      first_link_drawn() == link_color("web", True)
+      and first_link_fmt().foreground().color().name() == link_color("web", False))
 
 # ── auto-contrast OFF keeps the light colours (consistent with the grip) ───
 app._auto_contrast = False

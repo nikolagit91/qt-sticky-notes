@@ -30,16 +30,27 @@ te = note.text_edit
 c = te.textCursor(); c.insertText("milk"); te.toggle_checklist()
 
 def box_fg():
-    b = te.document().begin().position()
-    cc = QTextCursor(te.document()); cc.setPosition(b); cc.setPosition(b + 1, QTextCursor.MoveMode.KeepAnchor)
+    """The colour the box is DRAWN in: the document stores the light-note ink and
+    the editor's highlighter draws the dark-note ink on a dark note (2026-11-19 —
+    a flip no longer writes into the document)."""
+    doc = te.document(); blk = doc.begin()
+    for r in blk.layout().formats():
+        if r.start == 0 and r.format.foreground().style().value:
+            return r.format.foreground().color().name().lower()
+    cc = QTextCursor(doc); cc.setPosition(0); cc.setPosition(1, QTextCursor.MoveMode.KeepAnchor)
+    return cc.charFormat().foreground().color().name().lower()
+
+def box_stored():
+    cc = QTextCursor(te.document()); cc.setPosition(0); cc.setPosition(1, QTextCursor.MoveMode.KeepAnchor)
     return cc.charFormat().foreground().color().name().lower()
 
 check("light note: checkbox uses dark ink (visible)", box_fg() == DARK_INK.text.lower())
 
 # Switch to a black note → the box must flip to the light ink so it stays visible.
 note.color = "#000000"; note._apply_color()
-check("checkbox_text_color follows the note ink", te.checkbox_text_color.lower() == LIGHT_INK.text.lower())
-check("black note: checkbox recoloured to light ink (was invisible)", box_fg() == LIGHT_INK.text.lower())
+check("the box is STORED in the light-note ink (a flip writes nothing)",
+      box_stored() == DARK_INK.text.lower() and te.checkbox_text_color.lower() == DARK_INK.text.lower())
+check("black note: checkbox DRAWN in the light ink (was invisible)", box_fg() == LIGHT_INK.text.lower())
 
 # And back to a light note.
 note.color = "#fff8b8"; note._apply_color()

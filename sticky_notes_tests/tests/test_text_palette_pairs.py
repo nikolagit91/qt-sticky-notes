@@ -109,9 +109,11 @@ def shown(p, d=None):
     return stored(p, d)
 
 def fresh(html, note=None):
+    """Replace the content as LOADING does (setHtml happens only at load, which
+    then stores the light-note look of links/colours)."""
     note = note or n
     note.text_edit.setCurrentCharFormat(QTextCharFormat())
-    note.text_edit.setHtml(html); app.processEvents()
+    note.text_edit.setHtml(html); note.text_edit.canonicalize_colours(); app.processEvents()
 
 def palette_html(cols):
     return "".join(f'<p><span style="color:{c}">x</span></p>' for c in cols)
@@ -263,8 +265,8 @@ te.toggle_checkbox(0); app.processEvents()
 set_base(n, DARK_NOTE)
 check("done red item on a dark note: stored real red, faded",
       stored(3)[0] == "#e53935" and stored(3)[1] < 255)
-check("…drawn as the dark red twin with the same fade",
-      shown(3) == (TWIN["#e53935"], stored(3)[1]))
+check("…drawn as the dark red twin, with the stronger dark-note fade",
+      shown(3) == (TWIN["#e53935"], 165) and stored(3)[1] == 120)
 
 print(f"\n{len(fails)} FAIL" if fails else "\nALL PASS")
 sys.exit(1 if fails else 0)

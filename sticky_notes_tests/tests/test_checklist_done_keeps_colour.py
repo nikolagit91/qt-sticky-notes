@@ -126,10 +126,21 @@ setup(("obicno", "crveno")); colour_text(1, 2, 8, RED)
 tick(0); tick(1)
 light_alpha = fg(1, 3)[1]
 set_base("#2b2b2b")
-check("dark flip: done default item fades the NEW ink", fg(0, 3)[0] == ink() and fg(0, 3)[1] < 255)
+# A flip is display only (2026-11-19): the document keeps the light-note look,
+# the editor DRAWS the dark-note ink and the stronger dark-note fade.
+def drawn(bn, off):
+    b = doc.findBlockByNumber(bn)
+    for r in b.layout().formats():
+        if r.start <= off < r.start + r.length and \
+                r.format.foreground().style() != Qt.BrushStyle.NoBrush:
+            col = r.format.foreground().color()
+            return (col.name().lower(), col.alpha())
+    return fg(bn, off)[:2]
+check("dark flip: done default item DRAWN in the NEW ink, faded",
+      drawn(0, 3)[0] == ink() and drawn(0, 3)[1] < 255)
 check("dark flip: done red item stays red, faded", fg(1, 3)[0] == RED and fg(1, 3)[1] < 255)
-check("dark flip: done text a bit stronger on a dark note (readability)",
-      fg(1, 3)[1] > light_alpha)
+check("dark flip: done text DRAWN a bit stronger on a dark note (readability)",
+      drawn(1, 3)[1] > light_alpha and fg(1, 3)[1] == light_alpha)
 tick(1)
 check("dark flip then untick: full red", fg(1, 3) == (RED, 255, False))
 

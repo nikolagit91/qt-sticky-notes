@@ -122,6 +122,7 @@ def to_odt(document, path: str) -> None:
     # has no alpha and wrote them solid black (inline code = dark text on a
     # black box). Real fills for white paper, as the PDF does for its page.
     _restore_code_fills(doc, note_ink(QColor("#ffffff")))
+    _odt_checkboxes(doc)
     _flatten_alpha(doc)
 
     writer = QTextDocumentWriter(path)
@@ -173,15 +174,15 @@ def _ink_uncoloured(doc, ink: str) -> None:
 
 
 def _display_palette(doc, dark: bool) -> None:
-    """On a CLONE: rewrite text-palette colours as drawn on a light/dark note
-    (dark → each light-side colour becomes its dark twin, alpha kept). The live
-    document stores the light side and the editor's highlighter draws the twin;
-    a cloned document has no highlighter, so the PDF of a dark note needs this.
-    Links and checklist boxes (anchors) keep their colour."""
+    """On a CLONE: rewrite colours as DRAWN on a light/dark note (widgets.
+    drawn_colour — on a dark note: dark-note palette twins, link colours, the
+    checklist ink, a done item's stronger fade). The live document stores the
+    light-note look and the editor's highlighter draws the rest; a cloned
+    document has no highlighter, so the PDF of a dark note needs this."""
     if not dark:
         return
     from PyQt6.QtGui import QTextCursor, QTextCharFormat
-    from .theme import palette_display
+    from .widgets import drawn_colour
     runs = []
     blk = doc.begin()
     while blk.isValid():
@@ -189,14 +190,8 @@ def _display_palette(doc, dark: bool) -> None:
         while not it.atEnd():
             frag = it.fragment()
             it += 1
-            f = frag.charFormat()
-            if f.isAnchor() or f.foreground().style() == Qt.BrushStyle.NoBrush:
-                continue
-            old = f.foreground().color()
-            twin = palette_display(old.name(), True)
-            if twin != old.name():
-                col = QColor(twin)
-                col.setAlpha(old.alpha())
+            col = drawn_colour(frag.charFormat(), blk.text(), True)
+            if col is not None:
                 runs.append((frag.position(), frag.position() + frag.length(), col))
         blk = blk.next()
     for a, z, col in runs:
@@ -206,6 +201,38 @@ def _display_palette(doc, dark: bool) -> None:
         nf = QTextCharFormat()
         nf.setForeground(col)
         c.mergeCharFormat(nf)
+
+
+# A font with plain monochrome ☐ ☑ — what the note itself falls back to (fc-match).
+_BOX_FONT = "DejaVu Sans"
+
+
+def _odt_checkboxes(doc) -> None:
+    """On a CLONE for ODT: make checklist boxes plain monochrome glyphs.
+    - ☑ (U+2611) also has an emoji form, and the text font lacks it, so
+      LibreOffice drew a colour emoji (blue tile, white tick). U+FE0E did not
+      stop it; an explicit font that has the glyph did (rendered). Qt 6.4's
+      ODF writer writes only the OLD font-family property, so set both.
+    - The box is an anchor to the app-internal x-sticky-check, and the space
+      after it carries an empty href — both went out as hyperlinks. Plain text.
+    """
+    from PyQt6.QtGui import QTextCursor, QTextFormat
+    blk = doc.begin()
+    while blk.isValid():
+        if blk.text()[:1] in (CHECK_EMPTY, CHECK_DONE):
+            ends = 2 if blk.text()[1:2] == " " else 1      # the box and its space
+            for i in range(ends):
+                c = QTextCursor(doc)
+                c.setPosition(blk.position() + i)
+                c.setPosition(blk.position() + i + 1, QTextCursor.MoveMode.KeepAnchor)
+                f = c.charFormat()
+                f.clearProperty(QTextFormat.Property.IsAnchor)
+                f.clearProperty(QTextFormat.Property.AnchorHref)
+                if i == 0:
+                    f.setFontFamilies([_BOX_FONT])
+                    f.setProperty(QTextFormat.Property.OldFontFamily, _BOX_FONT)
+                c.setCharFormat(f)
+        blk = blk.next()
 
 
 def _flatten_alpha(doc, paper: str = "#ffffff") -> None:

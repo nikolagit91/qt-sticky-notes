@@ -16,12 +16,12 @@ from PyQt6.QtGui import (
 
 from .i18n import tr
 from .icons import _make_lock_icon, _SVG_COPY, _HAS_SVG
-from .theme import LINK_COLORS, link_color, palette_real, palette_display
+from .theme import LINK_COLORS, link_color, display_colour, store_colour, DARK_INK
 
 # Matches http(s):// URLs and bare www. URLs in pasted plain text.
 _URL_RE = re.compile(r'(https?://[^\s]+|www\.[^\s]+)')
-# Light-note link colours (the dark-note variants live in theme.LINK_COLORS and
-# are chosen per note by link_color(kind, dark) — see NoteTextEdit.link_dark).
+# Light-note link colours — the colour the document STORES; on a dark note the
+# editor draws the dark-note variant from theme.LINK_COLORS (drawn_colour).
 _LINK_COLOR_WEB    = LINK_COLORS["web"][0]      # http/https — familiar blue
 _LINK_COLOR_FOLDER = LINK_COLORS["folder"][0]   # local folders — warm amber
 _LINK_COLOR_FILE   = LINK_COLORS["file"][0]     # local files — violet
@@ -172,14 +172,29 @@ def _open_url(href: str):
         QDesktopServices.openUrl(QUrl(href))
 
 
-class _PaletteHighlighter(QSyntaxHighlighter):
-    """Draws text-palette colours in the twin for the note's ink — DISPLAY only.
-    The document keeps the light side (theme.palette_real); on a dark note each
-    light-side colour is painted as its dark twin (alpha kept, so a done item's
-    fade stays). A highlighter format lives in the block layout, not the
-    document: no undo step, not saved, not copied, not exported to ODT — the
-    earlier in-document swap leaked into all of those (measured 2026-11-15).
-    Links and checklist boxes (anchors) keep their own colour."""
+def drawn_colour(fmt, block_text: str, dark: bool):
+    """The colour a char is DRAWN in on a light/dark note, or None when that is
+    its stored colour. The document stores the light-note look (theme.
+    store_colour); on a dark note links, the explicit checklist ink and palette
+    colours show their dark-note variant, and a done item's fade the stronger
+    dark-note alpha. Shared by the editor's highlighter and the PDF export."""
+    if not dark or fmt.foreground().style() == Qt.BrushStyle.NoBrush:
+        return None
+    old = fmt.foreground().color()
+    href = fmt.anchorHref() if fmt.isAnchor() else ""
+    col = QColor(display_colour(old.name(), True, link=bool(href) and href != CHECK_HREF))
+    col.setAlpha(old.alpha())
+    if old.alpha() < 255 and block_text[:1] == CHECK_DONE:
+        col.setAlpha(_DONE_ALPHA_DARK)
+    return None if col.rgba() == old.rgba() else col
+
+
+class _InkHighlighter(QSyntaxHighlighter):
+    """Draws the dark-note look (drawn_colour) — DISPLAY only. A highlighter
+    format lives in the block layout, not the document: no undo step, not
+    saved, not copied, not exported to ODT. Writing the dark look INTO the
+    document leaked into all of those (measured 2026-11-15/19): Ctrl+Z after
+    the auto theme reverted links/boxes, copies pasted near-white."""
 
     def __init__(self, document):
         super().__init__(document)
@@ -194,18 +209,11 @@ class _PaletteHighlighter(QSyntaxHighlighter):
         while not it.atEnd():
             frag = it.fragment()
             it += 1
-            f = frag.charFormat()
-            if f.isAnchor() or f.foreground().style() == Qt.BrushStyle.NoBrush:
-                continue
-            old = f.foreground().color()
-            twin = palette_display(old.name(), True)
-            if twin == old.name():
-                continue
-            col = QColor(twin)
-            col.setAlpha(old.alpha())
-            nf = QTextCharFormat()
-            nf.setForeground(col)
-            self.setFormat(frag.position() - off, frag.length(), nf)
+            col = drawn_colour(frag.charFormat(), text, True)
+            if col is not None:
+                nf = QTextCharFormat()
+                nf.setForeground(col)
+                self.setFormat(frag.position() - off, frag.length(), nf)
 
 
 class NoteTextEdit(QTextEdit):
@@ -227,8 +235,10 @@ class NoteTextEdit(QTextEdit):
         # Populated by StickyNote after construction: Qt.Key → callable
         self._fmt_shortcuts = {}
         self._press_pos = None   # left-press start, to tell a click from a drag
-        self.checkbox_text_color = "#000000"   # note's text colour; set by StickyNote
-        self._palette_hl = _PaletteHighlighter(self.document())   # dark twins, display only
+        # The checklist's explicit ink, STORED in the light-note look; on a dark
+        # note _InkHighlighter draws it in the dark-note ink.
+        self.checkbox_text_color = DARK_INK.text
+        self._ink_hl = _InkHighlighter(self.document())   # dark-note look, display only
         self.code_bg_color = QColor(0, 0, 0, 18)   # note's code-block bg; set by StickyNote
         self.code_fg_color = QColor("#e8e8e8")   # note's code-block text; set by StickyNote
         self.paper_alpha = 255   # note bg opacity (0–255); code box follows it; set by StickyNote
@@ -252,7 +262,6 @@ class NoteTextEdit(QTextEdit):
         self._drag_overlay = None
         self._ghost_grab_dy = 0  # cursor offset within the grabbed row
         self.note_bg_color = "#fff59d"  # note background; set by StickyNote
-        self.link_dark = False          # note has a dark fill → light link colours
         self.setMouseTracking(True)
         self.viewport().setMouseTracking(True)
         # Scrolling would leave the copy button at a stale spot; hide it instead
@@ -831,12 +840,12 @@ class NoteTextEdit(QTextEdit):
             # or whatever the page styled them). Normalise them to this app's
             # link colours + underline so links look the same however they got
             # here. The checkbox glyph is an anchor too — leave it alone.
-            # A dark-side palette colour (copied from the build that stored the
-            # dark twin, or typed into another app) is stored as its real twin —
-            # the highlighter draws the dark one on a dark note.
+            # A dark-note colour (copied from a build that stored it, or from
+            # another app) is stored in its light-note look — the highlighter
+            # draws the dark one on a dark note.
             if not f.isAnchor() and f.foreground().style() != Qt.BrushStyle.NoBrush:
                 fg = f.foreground().color()
-                real = palette_real(fg.name())
+                real = store_colour(fg.name())
                 if real != fg.name():
                     col = QColor(real)
                     col.setAlpha(fg.alpha())
@@ -844,7 +853,7 @@ class NoteTextEdit(QTextEdit):
                     changed = True
             href = f.anchorHref()
             if f.isAnchor() and href and href != CHECK_HREF:
-                want = link_color(self.link_kind(href), self.link_dark)
+                want = link_color(self.link_kind(href), False)   # stored light; drawn per note
                 if f.foreground().color().name() != want or not f.fontUnderline():
                     f.setForeground(QColor(want))
                     f.setFontUnderline(True)
@@ -892,7 +901,7 @@ class NoteTextEdit(QTextEdit):
         fmt = QTextCharFormat(base_fmt)
         fmt.setAnchor(True)
         fmt.setAnchorHref(href)
-        fmt.setForeground(QColor(link_color(kind or self.link_kind(href), self.link_dark)))
+        fmt.setForeground(QColor(link_color(kind or self.link_kind(href), False)))   # stored light
         fmt.setFontUnderline(True)
         cursor.insertText(text, fmt)
         cursor.setCharFormat(base_fmt)   # don't let the link format bleed into later text
@@ -903,9 +912,11 @@ class NoteTextEdit(QTextEdit):
         [c.lower() for pair in LINK_COLORS.values() for c in pair] + ["#0000ff"])
 
     def recolor_links(self):
-        """Re-apply link colours for the note's current ink (light vs dark fill).
-        Fixed colours were unreadable on dark notes — violet measured 1.72:1 on
-        charcoal. The checkbox glyph is an anchor too, so it is skipped.
+        """Give every link the light-note colour of its kind — what the document
+        stores; on a dark note the editor DRAWS the dark variant (drawn_colour),
+        so this runs at load only (old notes: Qt's #0000ff, a dark variant, a
+        file that became a folder). The checkbox glyph is an anchor too, so it
+        is skipped. Writes only what differs, so a clean note adds no undo step.
 
         Also scrubs a link colour off the BLOCK char format: Qt paints a list
         item's bullet with that format, so a colour stranded there (old notes
@@ -934,7 +945,7 @@ class NoteTextEdit(QTextEdit):
                 href = f.anchorHref()
                 if not f.isAnchor() or not href or href == CHECK_HREF:
                     continue
-                want = link_color(self.link_kind(href), self.link_dark)
+                want = link_color(self.link_kind(href), False)
                 if f.foreground().color().name() != want:
                     nf = QTextCharFormat()
                     nf.setForeground(QColor(want))
@@ -942,56 +953,60 @@ class NoteTextEdit(QTextEdit):
             b = b.next()
         edit.endEditBlock()
 
-    def set_palette_dark(self, dark: bool):
-        """Draw text-palette colours for a light or dark note (_PaletteHighlighter).
-        A display-only re-layout — signals blocked because rehighlight emits
-        textChanged as if edited (measured). The other re-ink passes in
-        _apply_ink still edit the document and emit it themselves."""
-        if self._palette_hl.dark == dark:
+    def set_display_dark(self, dark: bool):
+        """Draw the dark-note (or light-note) look — _InkHighlighter, display only:
+        the document is not touched, so a theme flip is no undo step. Signals
+        blocked because rehighlight emits textChanged as if edited (measured)."""
+        if self._ink_hl.dark == dark:
             return
-        self._palette_hl.dark = dark
+        self._ink_hl.dark = dark
         was = self.blockSignals(True)
         try:
-            self._palette_hl.rehighlight()
+            self._ink_hl.rehighlight()
         finally:
             self.blockSignals(was)
 
-    def canonicalize_palette(self):
-        """Store every dark-side palette colour as its real (light) twin, keeping
-        alpha — for notes saved by the build that swapped colours inside the
-        document. Runs at load, before the undo history is cleared. Ranges are
-        collected first, then rewritten (editing while walking fragments relies
-        on Qt not merging them). Links and boxes are left alone."""
+    def canonicalize_colours(self):
+        """Store the light-note look everywhere: dark-note palette twins, the
+        dark-note checklist ink and dark-note link colours (theme.store_colour),
+        and a done item's fade at the stored alpha — what notes saved by older
+        builds (which wrote the dark look into the document) carry. Runs at
+        load, before the undo history is cleared; then recolor_links fixes
+        legacy link colours by kind. Ranges are collected first, then rewritten
+        (editing while walking fragments relies on Qt not merging them)."""
         doc = self.document()
         runs = []
         b = doc.begin()
         while b.isValid():
+            done_row = b.text()[:1] == CHECK_DONE
             it = b.begin()
             while not it.atEnd():
                 frag = it.fragment()
                 it += 1
                 f = frag.charFormat()
-                if f.isAnchor() or f.foreground().style() == Qt.BrushStyle.NoBrush:
+                if f.foreground().style() == Qt.BrushStyle.NoBrush:
                     continue
                 old = f.foreground().color()
-                real = palette_real(old.name())
-                if real != old.name():
-                    col = QColor(real)
-                    col.setAlpha(old.alpha())
+                href = f.anchorHref() if f.isAnchor() else ""
+                col = QColor(store_colour(old.name(), link=bool(href) and href != CHECK_HREF))
+                col.setAlpha(old.alpha())
+                if done_row and old.alpha() < 255:
+                    col.setAlpha(_DONE_ALPHA)
+                if col.rgba() != old.rgba():
                     runs.append((frag.position(), frag.position() + frag.length(), col))
             b = b.next()
-        if not runs:
-            return
-        edit = QTextCursor(doc)
-        edit.beginEditBlock()
-        for a, z, col in runs:
-            c = QTextCursor(doc)
-            c.setPosition(a)
-            c.setPosition(z, QTextCursor.MoveMode.KeepAnchor)
-            nf = QTextCharFormat()
-            nf.setForeground(col)
-            c.mergeCharFormat(nf)
-        edit.endEditBlock()
+        if runs:
+            edit = QTextCursor(doc)
+            edit.beginEditBlock()
+            for a, z, col in runs:
+                c = QTextCursor(doc)
+                c.setPosition(a)
+                c.setPosition(z, QTextCursor.MoveMode.KeepAnchor)
+                nf = QTextCharFormat()
+                nf.setForeground(col)
+                c.mergeCharFormat(nf)
+            edit.endEditBlock()
+        self.recolor_links()
 
     def _insert_text_linkified(self, cursor, text, base_fmt):
         last = 0
@@ -1612,7 +1627,9 @@ class NoteTextEdit(QTextEdit):
             body.mergeCharFormat(fmt)
 
     def _done_alpha(self) -> int:
-        return _DONE_ALPHA_DARK if self.link_dark else _DONE_ALPHA
+        """The fade a done item is STORED with (light-note look); on a dark note
+        it is drawn stronger (_DONE_ALPHA_DARK, drawn_colour)."""
+        return _DONE_ALPHA
 
     def toggle_checkbox(self, block_pos: int):
         """Toggle a box with cascade: checking/unchecking an item forces its whole
@@ -2003,29 +2020,48 @@ class NoteTextEdit(QTextEdit):
         every code block (a block that carries a background). Runs after load and
         whenever the note colour changes, so the dark box + light text track the
         note's ink."""
+        # Writes ONLY what differs: Qt records every setBlockFormat/merge as an
+        # undo step even when nothing changes, so the unconditional rewrite left
+        # 4 empty Ctrl+Z steps on every re-ink — even Yellow→Blue (measured).
         doc = self.document()
+        fg = self.code_fg_color.rgba()
         edit = QTextCursor(doc)
         edit.beginEditBlock()
         b = doc.begin()
         while b.isValid():
             if self._is_code_block(b):
-                bf = b.blockFormat()
+                bf = QTextBlockFormat(b.blockFormat())
                 bf.setBackground(_CODE_MARK_BG)   # transparent marker; box drawn in paintEvent
                 bf.setLeftMargin(CODE_BLOCK_MARGIN)
                 bf.setRightMargin(CODE_BLOCK_MARGIN)
                 self._set_code_edge_margins(bf, b)   # top/bottom only at region edges
                 bc = QTextCursor(doc); bc.setPosition(b.position())
-                bc.setBlockFormat(bf)
-                if b.textList() is None:              # not a bullet — safe to set (marker font)
+                if bf != b.blockFormat():
+                    bc.setBlockFormat(bf)
+                if b.textList() is None and \
+                        b.charFormat().fontFamilies() != [CODE_FONT_FAMILY]:   # not a bullet
                     bcf = QTextCharFormat(); bcf.setFontFamilies([CODE_FONT_FAMILY])
                     bc.mergeBlockCharFormat(bcf)       # empty code line keeps monospace height
-                line = QTextCursor(doc); line.setPosition(self._text_start(b))
-                line.movePosition(QTextCursor.MoveOperation.EndOfBlock,
-                                  QTextCursor.MoveMode.KeepAnchor)
-                cf = QTextCharFormat()
-                cf.setFontFamilies([CODE_FONT_FAMILY])
-                cf.setForeground(self.code_fg_color)
-                line.mergeCharFormat(cf)
+                start = self._text_start(b)
+                todo = []                          # collect first, then rewrite
+                it = b.begin()
+                while not it.atEnd():
+                    frag = it.fragment()
+                    it += 1
+                    a = max(frag.position(), start)
+                    z = frag.position() + frag.length()
+                    f = frag.charFormat()
+                    if a < z and not (f.fontFamilies() == [CODE_FONT_FAMILY]
+                                      and f.foreground().style() != Qt.BrushStyle.NoBrush
+                                      and f.foreground().color().rgba() == fg):
+                        todo.append((a, z))
+                for a, z in todo:
+                    line = QTextCursor(doc); line.setPosition(a)
+                    line.setPosition(z, QTextCursor.MoveMode.KeepAnchor)
+                    cf = QTextCharFormat()
+                    cf.setFontFamilies([CODE_FONT_FAMILY])
+                    cf.setForeground(self.code_fg_color)
+                    line.mergeCharFormat(cf)
             b = b.next()
         edit.endEditBlock()
 
@@ -2071,8 +2107,11 @@ class NoteTextEdit(QTextEdit):
         run (a character that carries a background). Char-level sibling of
         normalize_code_blocks; runs on load and note-colour change so inline code
         tracks the note colour. (Block-code chars carry a BLOCK background, not a
-        char background, so they're never touched here.)"""
+        char background, so they're never touched here.) Writes only chars that
+        differ: an unconditional merge is an undo step per char even when nothing
+        changes — 7 empty Ctrl+Z steps per re-ink for one word (measured)."""
         doc = self.document()
+        mark = _CODE_MARK_BG.rgba()
         edit = QTextCursor(doc)
         edit.beginEditBlock()
         b = doc.begin()
@@ -2082,7 +2121,10 @@ class NoteTextEdit(QTextEdit):
                 c = QTextCursor(doc)
                 c.setPosition(start + i)
                 c.setPosition(start + i + 1, QTextCursor.MoveMode.KeepAnchor)
-                if self._is_inline_code(c.charFormat()):
+                cf = c.charFormat()
+                if self._is_inline_code(cf) and not (
+                        cf.background().color().rgba() == mark
+                        and cf.fontFamilies() == [CODE_FONT_FAMILY]):
                     f = QTextCharFormat()
                     f.setBackground(_CODE_MARK_BG)   # transparent marker; chip drawn in paintEvent
                     f.setFontFamilies([CODE_FONT_FAMILY])
@@ -2107,45 +2149,6 @@ class NoteTextEdit(QTextEdit):
                 mbf = QTextBlockFormat()
                 mbf.setLeftMargin(want)
                 c.mergeBlockFormat(mbf)
-            b = b.next()
-        edit.endEditBlock()
-
-    def recolor_checklist(self, old_hex, new_hex):
-        """Recolour default-coloured checklist glyphs and text from old_hex to
-        new_hex so boxes and text stay readable when the note's ink flips (a dark
-        note needs light boxes/text). Only chars matching the old default are
-        touched — done-item grey and any user-picked colours are left alone.
-        Matched by RGB, keeping each char's alpha, so a DONE item's faded ink
-        follows too; done fades are re-set to the note's current done alpha
-        (call after link_dark is updated)."""
-        old, new = QColor(old_hex), QColor(new_hex)
-        if old == new:
-            return
-        doc = self.document()
-        fmt = QTextCharFormat()
-        fmt.setForeground(new)
-        edit = QTextCursor(doc)
-        edit.beginEditBlock()
-        b = doc.begin()
-        while b.isValid():
-            if self._is_check_line(b.text()):
-                start = b.position()
-                for i in range(b.length() - 1):     # exclude the block separator
-                    c = QTextCursor(doc)
-                    c.setPosition(start + i)
-                    c.setPosition(start + i + 1, QTextCursor.MoveMode.KeepAnchor)
-                    col = c.charFormat().foreground().color()
-                    if col.name() == old.name():
-                        nf = QColor(new)
-                        nf.setAlpha(col.alpha())
-                        if col.alpha() < 255:
-                            nf.setAlpha(self._done_alpha())
-                        fmt.setForeground(nf)
-                        c.mergeCharFormat(fmt)
-                    elif col.alpha() < 255 and b.text()[:1] == CHECK_DONE:
-                        col.setAlpha(self._done_alpha())   # user colour, faded
-                        f2 = QTextCharFormat(); f2.setForeground(col)
-                        c.mergeCharFormat(f2)
             b = b.next()
         edit.endEditBlock()
 

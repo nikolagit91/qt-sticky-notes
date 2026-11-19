@@ -356,6 +356,39 @@ def palette_display(hex_color: str, dark: bool) -> str:
     return _PALETTE_TO_DARK.get(hex_color.lower(), hex_color)
 
 
+# The document stores the LIGHT-note look of everything the note's ink decides
+# — palette colours, link colours, the explicit checklist ink — and the editor
+# DRAWS the dark-note look (widgets._InkHighlighter). A flip is then never a
+# document edit: nothing for Ctrl+Z to undo, nothing to leak into a copy/ODT.
+# `link` matters: #8ab4f8 is both the dark web-link colour and the dark twin of
+# the palette blue, so the way back depends on whether the char is a link.
+_LINK_TO_DARK  = {l: d for l, d in LINK_COLORS.values()}
+_LINK_TO_LIGHT = {d: l for l, d in LINK_COLORS.values()}
+
+
+def display_colour(hex_color: str, dark: bool, link: bool = False) -> str:
+    """Stored colour → the colour drawn on a light/dark note."""
+    if not dark:
+        return hex_color
+    h = hex_color.lower()
+    if link:
+        return _LINK_TO_DARK.get(h, hex_color)
+    if h == DARK_INK.text:
+        return LIGHT_INK.text
+    return _PALETTE_TO_DARK.get(h, hex_color)
+
+
+def store_colour(hex_color: str, link: bool = False) -> str:
+    """Any colour (dark-note look, e.g. saved/copied by an older build) → the
+    light-note look the document stores."""
+    h = hex_color.lower()
+    if link:
+        return _LINK_TO_LIGHT.get(h, hex_color)
+    if h == LIGHT_INK.text:
+        return DARK_INK.text
+    return _PALETTE_TO_LIGHT.get(h, hex_color)
+
+
 def link_color(kind: str, dark: bool) -> str:
     """Colour for a link of `kind` on a light or dark note. Unknown kinds fall
     back to the web pair."""
