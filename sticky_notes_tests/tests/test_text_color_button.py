@@ -32,6 +32,8 @@ from PyQt6.QtGui import QTextCursor, QColor, QTextCharFormat
 from PyQt6.QtTest import QTest
 from sticky_notes.app import StickyNotesApp
 from sticky_notes.theme import note_ink
+from sticky_notes.theme import TEXT_PALETTE
+TWIN = dict(TEXT_PALETTE)   # light-note colour → its dark-note twin
 
 app = StickyNotesApp(sys.argv[:1])
 for e in list(app.notes.values()):
@@ -112,7 +114,10 @@ check("ink flip with caret in default text: 'A' follows the new ink", glyph() ==
 set_base("#fff59d")
 fresh(f'<p><span style="color:{BLUE}">plavo</span></p>'); caret(3)
 set_base("#2b2b2b")
-check("ink flip with caret in blue text: 'A' stays blue", glyph() == BLUE)
+# The blue text itself swaps to its dark twin (theme.TEXT_PALETTE, 2026-11-13);
+# the "A" shows that text colour, not the ink.
+check("ink flip with caret in blue text: 'A' stays blue (dark twin)",
+      glyph() == TWIN[BLUE] and glyph() != ink())
 set_base("#fff59d")
 
 # ── the picker marks the caret's colour ──────────────────────────────────────

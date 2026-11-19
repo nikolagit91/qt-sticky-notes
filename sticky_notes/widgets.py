@@ -11,12 +11,12 @@ from PyQt6.QtCore import Qt, QUrl, QPoint, QRect, QRectF, QSize, pyqtSignal, QTi
 from PyQt6.QtGui import (
     QTextBlockFormat, QTextCharFormat, QTextFormat, QColor, QDesktopServices,
     QTextCursor, QPainter, QPen, QPixmap, QAction, QKeySequence, QBrush, QIcon,
-    QTextListFormat, QFontMetricsF, QDragLeaveEvent,
+    QTextListFormat, QFontMetricsF, QDragLeaveEvent, QSyntaxHighlighter,
 )
 
 from .i18n import tr
 from .icons import _make_lock_icon, _SVG_COPY, _HAS_SVG
-from .theme import LINK_COLORS, link_color
+from .theme import LINK_COLORS, link_color, palette_real, palette_display
 
 # Matches http(s):// URLs and bare www. URLs in pasted plain text.
 _URL_RE = re.compile(r'(https?://[^\s]+|www\.[^\s]+)')
@@ -172,6 +172,42 @@ def _open_url(href: str):
         QDesktopServices.openUrl(QUrl(href))
 
 
+class _PaletteHighlighter(QSyntaxHighlighter):
+    """Draws text-palette colours in the twin for the note's ink — DISPLAY only.
+    The document keeps the light side (theme.palette_real); on a dark note each
+    light-side colour is painted as its dark twin (alpha kept, so a done item's
+    fade stays). A highlighter format lives in the block layout, not the
+    document: no undo step, not saved, not copied, not exported to ODT — the
+    earlier in-document swap leaked into all of those (measured 2026-11-15).
+    Links and checklist boxes (anchors) keep their own colour."""
+
+    def __init__(self, document):
+        super().__init__(document)
+        self.dark = False
+
+    def highlightBlock(self, text):
+        if not self.dark:
+            return
+        block = self.currentBlock()
+        off = block.position()
+        it = block.begin()
+        while not it.atEnd():
+            frag = it.fragment()
+            it += 1
+            f = frag.charFormat()
+            if f.isAnchor() or f.foreground().style() == Qt.BrushStyle.NoBrush:
+                continue
+            old = f.foreground().color()
+            twin = palette_display(old.name(), True)
+            if twin == old.name():
+                continue
+            col = QColor(twin)
+            col.setAlpha(old.alpha())
+            nf = QTextCharFormat()
+            nf.setForeground(col)
+            self.setFormat(frag.position() - off, frag.length(), nf)
+
+
 class NoteTextEdit(QTextEdit):
     """QTextEdit with bullet-exit on Enter and formatting shortcuts (Ctrl+B/I/U/S)."""
 
@@ -192,6 +228,7 @@ class NoteTextEdit(QTextEdit):
         self._fmt_shortcuts = {}
         self._press_pos = None   # left-press start, to tell a click from a drag
         self.checkbox_text_color = "#000000"   # note's text colour; set by StickyNote
+        self._palette_hl = _PaletteHighlighter(self.document())   # dark twins, display only
         self.code_bg_color = QColor(0, 0, 0, 18)   # note's code-block bg; set by StickyNote
         self.code_fg_color = QColor("#e8e8e8")   # note's code-block text; set by StickyNote
         self.paper_alpha = 255   # note bg opacity (0–255); code box follows it; set by StickyNote
@@ -469,10 +506,26 @@ class NoteTextEdit(QTextEdit):
             end += 1
         return (start, end)
 
+    def _link_or_box(self, pos: int) -> bool:
+        """True if the char right of pos is a link OR a checklist box — the chars
+        the colour/underline actions must skip. _href_right alone reports the box
+        as a plain char (right for EDITING), which let a selection's colour and
+        underline land on the boxes; the box is a neutral ink glyph (_box_format)."""
+        if self._href_right(pos):
+            return True
+        if pos < 0 or pos >= self.document().characterCount() - 1:
+            return False
+        c = QTextCursor(self.document())
+        c.setPosition(pos)
+        c.setPosition(pos + 1, QTextCursor.MoveMode.KeepAnchor)
+        f = c.charFormat()
+        return f.isAnchor() and f.anchorHref() == CHECK_HREF
+
     def merge_format_preserving_links(self, fmt):
         """Merge `fmt` across the selection but SKIP characters inside a link, so
         a link keeps the two cues that say "this is a link" — its colour and its
-        underline. Used for the colour/underline actions only; bold, italic and
+        underline — and skip checklist boxes, which stay neutral ink glyphs.
+        Used for the colour/underline actions only; bold, italic and
         size stay free to apply everywhere. With no selection this is just the
         normal typing-format merge."""
         cur = self.textCursor()
@@ -485,9 +538,9 @@ class NoteTextEdit(QTextEdit):
         edit.beginEditBlock()
         pos = start
         while pos < end:
-            is_link = bool(self._href_right(pos))
+            is_link = self._link_or_box(pos)
             run_end = pos + 1
-            while run_end < end and bool(self._href_right(run_end)) == is_link:
+            while run_end < end and self._link_or_box(run_end) == is_link:
                 run_end += 1
             if not is_link:
                 seg = QTextCursor(doc)
@@ -500,7 +553,7 @@ class NoteTextEdit(QTextEdit):
     def clear_foreground_preserving_links(self):
         """Take the user's text colour OFF the selection (or the typing format), so
         the text follows the note's ink again — like text that was never
-        coloured. Links are skipped (their colour marks the link, as in
+        coloured. Links and checklist boxes are skipped (as in
         merge_format_preserving_links). Inside a code block "no colour" would be
         the dark note ink on the dark box, so there the code text colour is put
         back instead. merge can't clear a property, so each char is rebuilt from
@@ -519,7 +572,7 @@ class NoteTextEdit(QTextEdit):
         edit = QTextCursor(doc)
         edit.beginEditBlock()
         for i in range(start, end):
-            if self._href_right(i):
+            if self._link_or_box(i):
                 continue
             c = QTextCursor(doc)
             c.setPosition(i)
@@ -778,6 +831,17 @@ class NoteTextEdit(QTextEdit):
             # or whatever the page styled them). Normalise them to this app's
             # link colours + underline so links look the same however they got
             # here. The checkbox glyph is an anchor too — leave it alone.
+            # A dark-side palette colour (copied from the build that stored the
+            # dark twin, or typed into another app) is stored as its real twin —
+            # the highlighter draws the dark one on a dark note.
+            if not f.isAnchor() and f.foreground().style() != Qt.BrushStyle.NoBrush:
+                fg = f.foreground().color()
+                real = palette_real(fg.name())
+                if real != fg.name():
+                    col = QColor(real)
+                    col.setAlpha(fg.alpha())
+                    f.setForeground(col)
+                    changed = True
             href = f.anchorHref()
             if f.isAnchor() and href and href != CHECK_HREF:
                 want = link_color(self.link_kind(href), self.link_dark)
@@ -876,6 +940,57 @@ class NoteTextEdit(QTextEdit):
                     nf.setForeground(QColor(want))
                     c.mergeCharFormat(nf)
             b = b.next()
+        edit.endEditBlock()
+
+    def set_palette_dark(self, dark: bool):
+        """Draw text-palette colours for a light or dark note (_PaletteHighlighter).
+        A display-only re-layout — signals blocked because rehighlight emits
+        textChanged as if edited (measured). The other re-ink passes in
+        _apply_ink still edit the document and emit it themselves."""
+        if self._palette_hl.dark == dark:
+            return
+        self._palette_hl.dark = dark
+        was = self.blockSignals(True)
+        try:
+            self._palette_hl.rehighlight()
+        finally:
+            self.blockSignals(was)
+
+    def canonicalize_palette(self):
+        """Store every dark-side palette colour as its real (light) twin, keeping
+        alpha — for notes saved by the build that swapped colours inside the
+        document. Runs at load, before the undo history is cleared. Ranges are
+        collected first, then rewritten (editing while walking fragments relies
+        on Qt not merging them). Links and boxes are left alone."""
+        doc = self.document()
+        runs = []
+        b = doc.begin()
+        while b.isValid():
+            it = b.begin()
+            while not it.atEnd():
+                frag = it.fragment()
+                it += 1
+                f = frag.charFormat()
+                if f.isAnchor() or f.foreground().style() == Qt.BrushStyle.NoBrush:
+                    continue
+                old = f.foreground().color()
+                real = palette_real(old.name())
+                if real != old.name():
+                    col = QColor(real)
+                    col.setAlpha(old.alpha())
+                    runs.append((frag.position(), frag.position() + frag.length(), col))
+            b = b.next()
+        if not runs:
+            return
+        edit = QTextCursor(doc)
+        edit.beginEditBlock()
+        for a, z, col in runs:
+            c = QTextCursor(doc)
+            c.setPosition(a)
+            c.setPosition(z, QTextCursor.MoveMode.KeepAnchor)
+            nf = QTextCharFormat()
+            nf.setForeground(col)
+            c.mergeCharFormat(nf)
         edit.endEditBlock()
 
     def _insert_text_linkified(self, cursor, text, base_fmt):

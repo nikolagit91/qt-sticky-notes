@@ -17,7 +17,7 @@ from PyQt6.QtGui import QFont, QTextCharFormat, QTextCursor, QColor
 
 from .i18n import tr
 from .theme import (
-    UI, _btn_primary, _btn_secondary, note_ink,
+    UI, _btn_primary, _btn_secondary, note_ink, text_palette,
 )
 
 def _dialog_style() -> str:
@@ -349,13 +349,14 @@ class NoteDialogsMixin:
         swatches.addStretch(1)
         outer.addLayout(swatches)
 
-        for i, hex_c in enumerate(self.TEXT_COLORS):
+        # The side for this note's ink (theme.TEXT_PALETTE pairs).
+        for i, hex_c in enumerate(text_palette(ink.dark)):
             btn = QPushButton()
             btn.setFixedSize(32, 32)
             is_current = (not is_default and hex_c == self._text_color)
             border = f"2px solid {UI.TEXT}" if is_current else "1px solid rgba(0,0,0,0.15)"
-            if hex_c == "#ffffff":
-                border = f"1px solid {UI.BORDER}"
+            if hex_c == "#ffffff" and not is_current:
+                border = f"1px solid {UI.BORDER}"   # outline only — the mark must win
             btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {hex_c};

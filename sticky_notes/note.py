@@ -32,6 +32,7 @@ from .theme import (
     note_ink, effective_note_color, fmt_btn_style, size_label_style, sep_style,
     header_btn_style, family_btn_style, close_btn_style, progress_label_style,
     text_color_btn_style, text_edit_style, menu_style, border_visible,
+    palette_real, palette_display,
 )
 from .widgets import (NoteTextEdit, NoteHeader, CHECK_EMPTY, CHECK_DONE,
                       LIST_INDENT_WIDTH)
@@ -88,13 +89,6 @@ class StickyNote(NoteDialogsMixin, QWidget):
         "Plum":     "#322a3f",
         "Umber":    "#3a3129",
     }
-
-    TEXT_COLORS = [
-        "#000000", "#434343", "#666666", "#999999",
-        "#e53935", "#e67c13", "#f9a825", "#2e7d32",
-        "#1565c0", "#6a1b9a", "#ad1457", "#00838f",
-        "#ffffff", "#fce4ec", "#e8f5e9", "#e3f2fd",
-    ]
 
     def __init__(self, app_ref: "StickyNotesApp", note_id: str = None, data: dict = None):
         super().__init__()
@@ -187,6 +181,15 @@ class StickyNote(NoteDialogsMixin, QWidget):
 
             self._apply_color()
             self._apply_state()
+            # Colours saved by the build that stored dark twins in the document
+            # → their real colour (the highlighter draws the twin).
+            self.text_edit.canonicalize_palette()
+
+        # Loading (setHtml + the re-ink/normalize passes) left undo steps: Ctrl+Z
+        # right after opening reverted them — links turned Qt-blue #0000ff on a
+        # dark note (measured on 8c968d7). A freshly loaded note has nothing of
+        # the user's to undo yet.
+        self.text_edit.document().clearUndoRedoStacks()
 
         self._initializing = False   # restore complete, events can save now
         self._refresh_reminder_ui()  # show the bell if a reminder was restored
@@ -575,8 +578,9 @@ class StickyNote(NoteDialogsMixin, QWidget):
 
         SVG-icon header buttons (lock/pin/bell/toolbar-toggle) are NOT handled
         here — their colour lives inside the icon, not QSS — and are left as-is
-        for a follow-up. Text the user explicitly coloured keeps its own char
-        format; only the QTextEdit default text colour is set here."""
+        for a follow-up. Text the user coloured from the palette is DRAWN in the
+        palette twin for this ink (set_palette_dark — display only, the
+        document keeps the real colour); any other own colour is kept as is."""
         ink = note_ink(self._qcolor_base,
                        auto=getattr(self.app_ref, "_auto_contrast", True))
         self._qcolor_header = ink.header
@@ -593,6 +597,9 @@ class StickyNote(NoteDialogsMixin, QWidget):
         old_box = self.text_edit.checkbox_text_color
         self.text_edit.checkbox_text_color = ink.text
         self.text_edit.link_dark = ink.dark   # before recolor_checklist: done fade depends on it
+        # Palette colours the user picked are DRAWN as the twin for this ink
+        # (dark note → dark-note variant); the document keeps the real colour.
+        self.text_edit.set_palette_dark(ink.dark)
         self.text_edit.recolor_checklist(old_box, ink.text)
         # Links carry an explicit colour, so they don't follow the QTextEdit
         # default either — repoint them at the light/dark variant for this note
@@ -1062,6 +1069,10 @@ class StickyNote(NoteDialogsMixin, QWidget):
             if (doc.characterAt(pos) == " "
                     or self.text_edit._is_locked_block(doc.findBlock(pos))):
                 continue
+            # Underline skips links and checklist boxes (merge_format_preserving_
+            # links) — a never-underlined box would make "all underlined?" False.
+            if prop == "underline" and self.text_edit._link_or_box(pos):
+                continue
             c.setPosition(pos + 1)
             fmt = c.charFormat()
             if prop == "bold"      and fmt.fontWeight() < QFont.Weight.DemiBold: return False
@@ -1099,6 +1110,9 @@ class StickyNote(NoteDialogsMixin, QWidget):
 
     @_skips_checked_rows
     def _apply_text_color(self, hex_color: str):
+        # The dark picker shows dark twins; the document stores the real colour
+        # (the highlighter draws the twin on a dark note).
+        hex_color = palette_real(hex_color)
         self._text_color = hex_color
         # NOT checkbox_text_color: that is the note's DEFAULT checklist ink, which
         # recolor_checklist uses to tell default text from user colours — writing
@@ -1716,8 +1730,12 @@ class StickyNote(NoteDialogsMixin, QWidget):
         anchor, and the picker never recolours links."""
         ink = note_ink(self._qcolor_base,
                        auto=getattr(self.app_ref, "_auto_contrast", True))
-        if not fmt.isAnchor() and fmt.foreground().style() != Qt.BrushStyle.NoBrush:
-            colour = fmt.foreground().color().name()
+        own = not fmt.isAnchor() and fmt.foreground().style() != Qt.BrushStyle.NoBrush
+        # An explicit colour equal to the ink is the default too: a checklist item
+        # made with Enter carries the ink explicitly (_plain_format).
+        if own and fmt.foreground().color().name() != QColor(ink.text).name():
+            # What is DRAWN: a palette colour shows its twin on a dark note.
+            colour = palette_display(fmt.foreground().color().name(), ink.dark)
             self._text_color_default = False
         else:
             colour = ink.text

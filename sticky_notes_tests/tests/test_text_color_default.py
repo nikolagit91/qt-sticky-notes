@@ -102,6 +102,15 @@ fresh('<p><span style="color:#000000">crno</span></p>'); caret(2)
 n._open_text_color_picker()
 check("on black text the picker marks black, not 'Default colour'",
       captured.get("swatches_marked") == ["#000000"] and not captured.get("marked"))
+# A checklist item made with Enter carries the ink EXPLICITLY (_plain_format) —
+# it is still default text, so the picker must mark "Default colour".
+te.setCurrentCharFormat(QTextCharFormat()); te.setPlainText("")
+te.setFocus(); QTest.keyClicks(te, "prva"); te.toggle_checklist()
+c = te.textCursor(); c.movePosition(QTextCursor.MoveOperation.End); te.setTextCursor(c)
+QTest.keyClick(te, Qt.Key.Key_Return); QTest.keyClicks(te, "druga"); app.processEvents()
+n._open_text_color_picker()
+check("Enter-made checklist item (explicit ink): picker marks 'Default colour'",
+      captured.get("marked") and captured.get("swatches_marked") == [])
 QDialog.exec = _real_exec
 
 check("note has a 'default text colour' action", has_default_action())

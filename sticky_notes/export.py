@@ -113,6 +113,15 @@ def to_odt(document, path: str) -> None:
     if df.pointSize() <= 0 and df.pixelSize() > 0:
         df.setPointSizeF(df.pixelSize() * 72.0 / 96.0)
     doc.setDefaultFont(df)
+    # ODT is white paper = the light-note look: text with no colour of its own
+    # gets the light-note ink, as on screen (else it is written colourless →
+    # black, indistinguishable from a picked black).
+    from .theme import DARK_INK, note_ink
+    _ink_uncoloured(doc, DARK_INK.text)
+    # Code box / inline chip backgrounds are transparent MARKERS on screen; ODF
+    # has no alpha and wrote them solid black (inline code = dark text on a
+    # black box). Real fills for white paper, as the PDF does for its page.
+    _restore_code_fills(doc, note_ink(QColor("#ffffff")))
     _flatten_alpha(doc)
 
     writer = QTextDocumentWriter(path)
@@ -121,25 +130,120 @@ def to_odt(document, path: str) -> None:
         raise RuntimeError(f"Could not write {path}")
 
 
-def _flatten_alpha(doc, paper: str = "#ffffff") -> None:
-    """ODF has no alpha: a translucent text colour (a done checklist item keeps
-    its own colour, faded) would be written at FULL strength. Pre-blend it onto
-    the page colour in the cloned document so it still reads as faded."""
+def _draw_text(doc, painter, clip, text_color=None) -> None:
+    """Paint `doc` inside `clip` like QTextDocument.drawContents, but with text
+    that has no colour of its own drawn in `text_color` (the note's ink). On
+    screen that colour comes from the editor's stylesheet; a cloned document has
+    none, so drawContents used the default palette's BLACK — black on the dark
+    page of a dark note's PDF (user report 2026-11-19)."""
+    from PyQt6.QtGui import QAbstractTextDocumentLayout, QPalette
+    ctx = QAbstractTextDocumentLayout.PaintContext()
+    ctx.clip = clip
+    if text_color:
+        ctx.palette.setColor(QPalette.ColorRole.Text, QColor(text_color))
+    painter.save()
+    painter.setClipRect(clip)
+    doc.documentLayout().draw(painter, ctx)
+    painter.restore()
+
+
+def _ink_uncoloured(doc, ink: str) -> None:
+    """On a CLONE: give text with no colour of its own the explicit `ink`, so a
+    format that has no "default text colour" (ODT) shows it as the note does.
+    Links and checklist boxes (anchors) keep their own colour."""
     from PyQt6.QtGui import QTextCursor, QTextCharFormat
-    bg = QColor(paper)
-    blk = doc.firstBlock()
+    runs = []
+    blk = doc.begin()
     while blk.isValid():
         it = blk.begin()
         while not it.atEnd():
             frag = it.fragment()
+            it += 1
+            f = frag.charFormat()
+            if not f.isAnchor() and f.foreground().style() == Qt.BrushStyle.NoBrush:
+                runs.append((frag.position(), frag.position() + frag.length()))
+        blk = blk.next()
+    fmt = QTextCharFormat()
+    fmt.setForeground(QColor(ink))
+    for a, z in runs:
+        c = QTextCursor(doc)
+        c.setPosition(a)
+        c.setPosition(z, QTextCursor.MoveMode.KeepAnchor)
+        c.mergeCharFormat(fmt)
+
+
+def _display_palette(doc, dark: bool) -> None:
+    """On a CLONE: rewrite text-palette colours as drawn on a light/dark note
+    (dark → each light-side colour becomes its dark twin, alpha kept). The live
+    document stores the light side and the editor's highlighter draws the twin;
+    a cloned document has no highlighter, so the PDF of a dark note needs this.
+    Links and checklist boxes (anchors) keep their colour."""
+    if not dark:
+        return
+    from PyQt6.QtGui import QTextCursor, QTextCharFormat
+    from .theme import palette_display
+    runs = []
+    blk = doc.begin()
+    while blk.isValid():
+        it = blk.begin()
+        while not it.atEnd():
+            frag = it.fragment()
+            it += 1
+            f = frag.charFormat()
+            if f.isAnchor() or f.foreground().style() == Qt.BrushStyle.NoBrush:
+                continue
+            old = f.foreground().color()
+            twin = palette_display(old.name(), True)
+            if twin != old.name():
+                col = QColor(twin)
+                col.setAlpha(old.alpha())
+                runs.append((frag.position(), frag.position() + frag.length(), col))
+        blk = blk.next()
+    for a, z, col in runs:
+        c = QTextCursor(doc)
+        c.setPosition(a)
+        c.setPosition(z, QTextCursor.MoveMode.KeepAnchor)
+        nf = QTextCharFormat()
+        nf.setForeground(col)
+        c.mergeCharFormat(nf)
+
+
+def _flatten_alpha(doc, paper: str = "#ffffff") -> None:
+    """ODF has no alpha: a translucent colour would be written at FULL strength
+    — a done checklist item's faded text, and a translucent background (inline
+    code chip overlay) as solid black. Pre-blend each onto the page colour (the
+    chip onto the block's own box when it sits in a code block) in the cloned
+    document so it reads as on screen."""
+    from PyQt6.QtGui import QTextCursor, QTextCharFormat, QTextBlockFormat
+    page = QColor(paper)
+
+    def blend(col, under):
+        a = col.alphaF()
+        return QColor(round(col.red() * a + under.red() * (1 - a)),
+                      round(col.green() * a + under.green() * (1 - a)),
+                      round(col.blue() * a + under.blue() * (1 - a)))
+
+    blk = doc.firstBlock()
+    while blk.isValid():
+        under = page
+        bbr = blk.blockFormat().background()
+        if bbr.style() != Qt.BrushStyle.NoBrush:
+            if bbr.color().alpha() < 255:
+                bf = QTextBlockFormat(blk.blockFormat())
+                bf.setBackground(blend(bbr.color(), page))
+                QTextCursor(blk).setBlockFormat(bf)
+            under = blk.blockFormat().background().color()
+        it = blk.begin()
+        while not it.atEnd():
+            frag = it.fragment()
+            cf = QTextCharFormat()
             br = frag.charFormat().foreground()
-            col = br.color()
-            if br.style() != Qt.BrushStyle.NoBrush and col.alpha() < 255:
-                a = col.alphaF()
-                flat = QColor(round(col.red() * a + bg.red() * (1 - a)),
-                              round(col.green() * a + bg.green() * (1 - a)),
-                              round(col.blue() * a + bg.blue() * (1 - a)))
-                cf = QTextCharFormat(); cf.setForeground(flat)
+            if br.style() != Qt.BrushStyle.NoBrush and br.color().alpha() < 255:
+                cf.setForeground(blend(br.color(), under))
+            bg = frag.charFormat().background()
+            if bg.style() != Qt.BrushStyle.NoBrush and bg.color().alpha() < 255:
+                cf.setBackground(blend(bg.color(), under))
+            if cf.properties():
                 cur = QTextCursor(doc)
                 cur.setPosition(frag.position())
                 cur.setPosition(frag.position() + frag.length(), QTextCursor.MoveMode.KeepAnchor)
@@ -214,9 +318,15 @@ def to_pdf(document, path: str, page_color: str = None) -> None:
     # rounded box is painted by the editor's paintEvent, which drawContents does
     # not run). Restore an opaque fill on the clone so the box still shows in the
     # PDF — a plain rectangle here, but visible. Derived from the page colour.
+    ink_text = None                     # uncoloured text: Qt's default black
     if page_color:
         from .theme import note_ink
-        _restore_code_fills(doc, note_ink(QColor(page_color)))
+        ink = note_ink(QColor(page_color))
+        ink_text = ink.text             # …or, on a note page, the note's ink
+        _restore_code_fills(doc, ink)
+        # The page is the note's colour: on a dark one draw palette colours as
+        # their dark twins, as the editor does (its highlighter isn't in a clone).
+        _display_palette(doc, ink.dark)
 
     painter = QPainter()
     if not painter.begin(writer):
@@ -257,7 +367,7 @@ def to_pdf(document, path: str, page_color: str = None) -> None:
             painter.translate(pad, pad - pg * text_h)
             clip = QRectF(0, pg * text_h, inner_w, text_h)
             painter.setClipRect(clip)
-            doc.drawContents(painter, clip)
+            _draw_text(doc, painter, clip, ink_text)
             painter.restore()
 
             if multipage:                       # subtle centred page number

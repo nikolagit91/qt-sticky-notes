@@ -313,6 +313,49 @@ LINK_COLORS = {
 }
 
 
+# Text-colour palette as (light-note, dark-note) PAIRS, in picker order (4×4).
+# A palette colour is always shown in the variant for the note's ink: the
+# picker offers that side, and on a dark note every palette colour is DRAWN as
+# its twin (widgets._PaletteHighlighter — display only). The document always
+# stores the light side (palette_real), so saving, copying and ODT carry the
+# real colour. The two sides are disjoint and paired 1:1, so a dark-side colour
+# that reaches the document (paste) maps back unambiguously. The light side's first 12 are the
+# original palette (existing text keeps its colour). Dark twins keep the hue
+# and clear 4.5:1 on every built-in dark note (the subtle grey ~3.7, mirroring
+# its light twin). The last row was white + pastels on both — invisible on a
+# light note — so the light side got muted tones of the same family.
+TEXT_PALETTE = [
+    ("#000000", "#f5f5f5"), ("#434343", "#d0d0d0"), ("#666666", "#ababab"), ("#999999", "#909090"),
+    ("#e53935", "#f28b82"), ("#e67c13", "#fcad70"), ("#f9a825", "#fdd663"), ("#2e7d32", "#81c995"),
+    ("#1565c0", "#8ab4f8"), ("#6a1b9a", "#c58af9"), ("#ad1457", "#ff8bcb"), ("#00838f", "#78d9ec"),
+    ("#4a5560", "#ffffff"), ("#9a3d62", "#fce4ec"), ("#336b50", "#e8f5e9"), ("#37628a", "#e3f2fd"),
+]
+
+
+_PALETTE_TO_DARK  = {l: d for l, d in TEXT_PALETTE}
+_PALETTE_TO_LIGHT = {d: l for l, d in TEXT_PALETTE}
+
+
+def text_palette(dark: bool) -> list:
+    """The picker's swatches for a light or dark note."""
+    return [d if dark else l for l, d in TEXT_PALETTE]
+
+
+def palette_real(hex_color: str) -> str:
+    """The colour the DOCUMENT stores: a dark-side palette colour → its light
+    twin; anything else unchanged. The document always holds the light side —
+    it is what is saved, copied and exported to (white-paper) ODT."""
+    return _PALETTE_TO_LIGHT.get(hex_color.lower(), hex_color)
+
+
+def palette_display(hex_color: str, dark: bool) -> str:
+    """The colour drawn for a stored colour on a light/dark note: on a dark note
+    a light-side palette colour shows its dark twin; anything else unchanged."""
+    if not dark:
+        return hex_color
+    return _PALETTE_TO_DARK.get(hex_color.lower(), hex_color)
+
+
 def link_color(kind: str, dark: bool) -> str:
     """Colour for a link of `kind` on a light or dark note. Unknown kinds fall
     back to the web pair."""
