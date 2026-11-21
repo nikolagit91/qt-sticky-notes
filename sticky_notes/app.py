@@ -9,6 +9,7 @@ import uuid
 import shlex
 import shutil
 import datetime
+import time
 
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
@@ -324,6 +325,15 @@ class StickyNotesApp(StorageMixin, SettingsMixin, TrayMixin, QApplication):
         self._refresh_manager()
         QTimer.singleShot(2000, self._trim_memory)
 
+    @staticmethod
+    def _drop_stale_reminder(note):
+        """A note coming back from Archive or Trash drops a reminder whose time
+        passed while it was put away, instead of firing it late (the scheduler
+        only watches active notes). One still in the future is kept and fires
+        normally. User decision 2026-11-21."""
+        if note._reminder is not None and note._reminder <= time.time():
+            note.set_reminder(None)
+
     def restore_from_trash(self, note_data: dict) -> bool:
         """Restore a note from Trash back to Active. Returns False (without
         restoring) if Active is already at ACTIVE_LIMIT, so nothing is silently
@@ -331,6 +341,7 @@ class StickyNotesApp(StorageMixin, SettingsMixin, TrayMixin, QApplication):
         if len(self.notes) >= ACTIVE_LIMIT:
             return False
         note = StickyNote(self, note_data.get("id"), note_data)
+        self._drop_stale_reminder(note)
         self.notes[note.note_id] = note
         self.trash_notes = [n for n in self.trash_notes if n["id"] != note_data["id"]]
         self._save_trash_notes()
@@ -379,6 +390,7 @@ class StickyNotesApp(StorageMixin, SettingsMixin, TrayMixin, QApplication):
         if len(self.notes) >= ACTIVE_LIMIT:
             return False
         note = StickyNote(self, note_data.get("id"), note_data)
+        self._drop_stale_reminder(note)
         self.notes[note.note_id] = note
         self.archived_notes = [n for n in self.archived_notes if n["id"] != note_data["id"]]
         self._save_archived_notes()
