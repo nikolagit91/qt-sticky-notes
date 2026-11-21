@@ -111,7 +111,7 @@ The app sets itself up:
 - The **tray icon** (top bar) is the main entry point — click it for
   *New Note*, *Show All*, *Settings*, *Manager*.
 - **Settings:** theme (light/dark/auto), font, size, opacity, backups,
-  language (English/Croatian), and more.
+  language (11 languages), and more.
 - **Manager:** all notes, archive, trash, search.
 - Press **F1** on a note for the full list of keyboard shortcuts.
 
